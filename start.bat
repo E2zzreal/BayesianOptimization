@@ -9,9 +9,16 @@ if %ERRORLEVEL% neq 0 (
 )
 
 REM Check and install dependencies
+echo Installing required dependencies...
 pip install -r requirements.txt
 
+REM Set environment variables for Docker compatibility
+set PYTHONPATH=%~dp0
+set STREAMLIT_SERVER_PORT=8501
+set STREAMLIT_SERVER_HEADLESS=true
+
 REM Start the application
+echo Starting Bayesian Optimization Material System...
 streamlit run app/main.py
 
 pause

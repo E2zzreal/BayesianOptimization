@@ -234,3 +234,33 @@ class BayesianOptimizer:
         # 根据采样函数值排序并选择前n个点
         sorted_grid = grid_df.sort_values('acquisition_value', ascending=False)
         recommendations = sorted_grid.head(n_recommendations).reset_index(drop=True)
+        
+        return recommendations
+    
+    def update_with_new_data(self, original_data, new_data, features, target):
+        """
+        合并原始数据和新实验数据，并返回合并后的数据集
+        
+        参数:
+            original_data: 原始数据DataFrame
+            new_data: 新实验数据DataFrame
+            features: 特征列名列表
+            target: 目标列名
+            
+        返回:
+            合并后的DataFrame
+        """
+        # 确保新数据包含所需的列
+        required_columns = features + [target]
+        missing_columns = [col for col in required_columns if col not in new_data.columns]
+        
+        if missing_columns:
+            raise ValueError(f"新数据缺少以下列: {', '.join(missing_columns)}")
+        
+        # 只保留所需的列
+        new_data_subset = new_data[required_columns].copy()
+        
+        # 合并数据
+        combined_data = pd.concat([original_data, new_data_subset], ignore_index=True)
+        
+        return combined_data

@@ -109,6 +109,9 @@ venv.bak/
 
 # Docker
 .docker/
+docker-compose.override.yml
+*.env
+.dockerignore
 
 # IDE files
 .idea/

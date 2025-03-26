@@ -29,21 +29,46 @@
 
 ## 快速开始
 
-### 使用Docker运行
+### 使用Docker（推荐）
 
-1. 确保已安装Docker
+1. 确保已安装 [Docker](https://www.docker.com/products/docker-desktop/) 和 [Docker Compose](https://docs.docker.com/compose/install/)
 
-2. 拉取镜像
+2. 克隆本仓库
    ```bash
-   docker pull [镜像名称]
+   git clone https://github.com/your-username/BO-docker.git
+   cd BO-docker
    ```
 
-3. 运行容器
+3. 使用Docker Compose启动应用
    ```bash
-   docker run -p 8501:8501 [镜像名称]
+   docker-compose up -d
    ```
 
-4. 在浏览器中访问 `http://localhost:8501` 打开应用界面
+4. 在浏览器中访问 http://localhost:8501
+
+### 本地运行
+
+1. 确保已安装Python 3.9或更高版本
+
+2. 克隆本仓库
+   ```bash
+   git clone https://github.com/your-username/BO-docker.git
+   cd BO-docker
+   ```
+
+3. 安装依赖
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+4. 运行应用
+   ```bash
+   streamlit run app/main.py
+   ```
+   或使用提供的批处理文件
+   ```bash
+   start.bat
+   ```
 
 ## 使用指南
 
@@ -51,41 +76,61 @@
    - 点击"上传CSV文件"按钮
    - 选择包含实验数据的CSV文件
    - 选择作为特征的列和目标列
+   - 系统会自动初始化特征搜索空间
 
 2. **模型训练**：
    - 点击"训练模型"按钮
    - 系统将自动训练多个模型并显示评估结果
    - 选择最佳模型用于后续优化
+   - 设置评估指标（R²或RMSE）
+   - 设置训练测试集划分比例和交叉验证折数
 
 3. **特征空间定义**：
    - 为每个特征设置范围和步长
    - 点击"生成特征空间"按钮
+   - 选择采样函数（EI、UCB或PI）
+   - 设置优化方向（最大化或最小化）
 
 4. **实验推荐**：
    - 选择采样函数(EI、UCB等)
    - 设置推荐实验数量
    - 点击"生成推荐"按钮获取下一轮实验条件
+   - 生成实验推荐并下载
 
 5. **迭代优化**：
    - 完成推荐实验后，上传新的实验结果
    - 点击"更新模型"按钮重新训练
    - 获取新的实验推荐，继续迭代
+   - 查看优化历史和进程图
 
 ## 项目结构
 
 ```
 ├── app/                    # 应用主目录
 │   ├── main.py             # 主应用入口
-│   ├── pages/              # 多页面应用组件
-│   ├── utils/              # 工具函数
 │   ├── models/             # 机器学习模型
-│   └── optimization/       # 贝叶斯优化相关代码
+│   ├── optimization/       # 贝叶斯优化相关代码
+│   └── utils/              # 工具函数
 ├── data/                   # 数据存储目录
-├── tests/                  # 测试代码
 ├── Dockerfile              # Docker配置文件
+├── docker-compose.yml      # Docker Compose配置
 ├── requirements.txt        # 项目依赖
+├── start.bat               # Windows启动脚本
 └── README.md               # 项目说明
 ```
+
+## 依赖项
+
+- Python 3.9+
+- scikit-learn 1.2.0+
+- xgboost 1.7.0+
+- streamlit 1.13.0+
+- scikit-optimize 0.9.0+
+- GPy 1.10.0+
+- GPyOpt 1.2.6+
+- joblib 1.2.0+
+- pandas 1.5.0+
+- numpy 1.23.0+
 
 ## 技术栈
 

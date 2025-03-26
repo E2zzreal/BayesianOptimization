@@ -370,6 +370,10 @@ elif page == "迭代优化":
                             # 获取当前最佳目标值
                             best_target = y.max() if st.session_state.optimization_direction == "最大化" else y.min()
                             
+                            # 保存优化方向
+                            if 'optimization_direction' not in st.session_state:
+                                st.session_state.optimization_direction = "最大化"  # 默认为最大化
+                                
                             # 更新优化历史
                             st.session_state.optimization_history.append({
                                 "data_size": len(combined_data),
