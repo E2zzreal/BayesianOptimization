@@ -165,7 +165,15 @@ elif page == "模型训练与评估":
                     results_df["train_score"] = results_df["train_score"].apply(lambda x: f"{x:.4f}")
                     
                     # 显示结果表格
-                    st.dataframe(results_df)
+                    # 创建格式化后的显示数据框
+                    display_df = pd.DataFrame([{
+                        '模型名称': r['model_name'],
+                        '测试分数': r['test_score'],
+                        '交叉验证分数': r['cv_score'],
+                        '训练分数': r['train_score']
+                    } for r in results])
+                    
+                    st.dataframe(display_df)
                     
                     # 获取最佳模型
                     best_model_name = results_df.iloc[0]["model_name"]

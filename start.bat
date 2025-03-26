@@ -16,6 +16,7 @@ REM Set environment variables for Docker compatibility
 set PYTHONPATH=%~dp0
 set STREAMLIT_SERVER_PORT=8501
 set STREAMLIT_SERVER_HEADLESS=true
+set STREAMLIT_ARROW_DATAFRAME_USE_LEGACY=true
 
 REM Start the application
 echo Starting Bayesian Optimization Material System...

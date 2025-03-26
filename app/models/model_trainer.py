@@ -29,7 +29,8 @@ class ModelTrainer:
         self.random_state = random_state
         self.test_size = test_size
         self.cv_folds = cv_folds
-        self.metric = metric
+        # 确保metric始终为标准格式
+        self.metric = 'r2' if metric in ['r2', 'r²'] else metric
         self.best_model = None
         
         # Define available models
@@ -97,6 +98,13 @@ class ModelTrainer:
                 random_state=self.random_state
             )
             
+        # 添加特征名称处理
+        if hasattr(model, 'feature_names_in_'):
+            try:
+                model.feature_names_in_ = X.columns.tolist()
+            except AttributeError:
+                pass
+        
         model.fit(X, y)
         return model
     
@@ -182,25 +190,41 @@ class ModelTrainer:
                 train_metrics = self.evaluate_model(trained_model, X_train, y_train)
                 
                 # Store results
+                # 确保使用正确的键名访问评估指标
+                metric_key = self.metric
+                # 修改结果存储，添加综合评分
                 result = {
                     'model_name': model_name,
-                    'model': trained_model,
-                    'test_score': eval_metrics[self.metric],
+                    # 移除原始模型对象
+                    'model_type': model_name,  # 改为存储模型类型名称
+                    'test_score': eval_metrics[metric_key],
                     'cv_score': cv_score,
-                    'train_score': train_metrics[self.metric]
+                    'train_score': train_metrics[metric_key],
+                    'combined_score': (eval_metrics[metric_key] + cv_score) / 2
                 }
                 
                 results.append(result)
                 
             except Exception as e:
                 print(f"Error training {model_name}: {str(e)}")
+                import traceback
+                print(traceback.format_exc())
         
-        # Sort results by test score
-        results.sort(key=lambda x: x['test_score'], reverse=(self.metric == 'r2'))
+        # 修改排序逻辑
+        if self.metric == 'r2':
+            # 对于R2，值越大越好
+            results.sort(key=lambda x: x['combined_score'], reverse=True)
+        else:
+        # 对于RMSE，值越小越好
+            results.sort(key=lambda x: x['combined_score'], reverse=False)
         
-        # Store best model
+        # 存储最佳模型（基于综合评分）
         if results:
-            self.best_model = results[0]['model']
+            # 存储最佳模型改为存储模型名称和类型
+            self.best_model = {
+                'name': results[0]['model_name'],
+                'type': results[0]['model_type']
+            }
         
         return results
     
