@@ -1,46 +1,74 @@
 @echo off
-echo ===== 贝叶斯优化材料组分系统打包工具 =====
+echo ===== Bayesian Optimization Material Composition System Packager =====
 echo.
 
-REM 检查Python是否安装
+REM Check Python installation
 python --version >nul 2>&1
 if %ERRORLEVEL% neq 0 (
-    echo 错误: 未检测到Python安装。请安装Python 3.9或更高版本。
+    echo Error: Python not detected. Please install Python 3.9 or higher.
     pause
     exit /b 1
 )
 
-REM 创建并激活虚拟环境
-echo 正在创建虚拟环境...
+REM Create and activate virtual environment
+echo [1/5] Creating virtual environment...
+if exist venv (
+    echo Deleting existing virtual environment...
+    rmdir /s /q venv
+)
 python -m venv venv
-call venv\Scripts\activate.bat
+if %ERRORLEVEL% neq 0 (
+    echo Error: Failed to create virtual environment
+    pause
+    exit /b 1
+)
 
-REM 安装依赖项
-echo 正在安装依赖项...
+call venv\Scripts\activate
+if %ERRORLEVEL% neq 0 (
+    echo Error: Failed to activate virtual environment
+    pause
+    exit /b 1
+)
+
+REM Install dependencies
+echo [2/5] Installing dependencies...
+python -m pip install --upgrade pip
 pip install -r requirements.txt
 pip install cx_Freeze
+if %ERRORLEVEL% neq 0 (
+    echo Error: Dependency installation failed
+    pause
+    exit /b 1
+)
 
-REM 创建数据目录（如果不存在）
+REM Create data directory
+echo [3/5] Preparing data directory...
 if not exist data mkdir data
 
-REM 构建应用
-echo 正在构建应用...
-python setup.py build
+REM Build application
+echo [4/5] Building application...
+python setup.py build_exe
+if %ERRORLEVEL% neq 0 (
+    echo Error: Application build failed
+    pause
+    exit /b 1
+)
 
-REM 复制额外文件
-echo 正在复制额外文件...
-if not exist build\exe.win-amd64-3.9\data mkdir build\exe.win-amd64-3.9\data
-
-REM 创建安装包
-echo 正在创建安装包...
+REM Create installer package
+echo [5/5] Creating installer package...
 python setup.py bdist_msi
+if %ERRORLEVEL% neq 0 (
+    echo Error: Installer creation failed
+    pause
+    exit /b 1
+)
 
-REM 完成
 echo.
-echo 构建完成！可执行文件位于 build\exe.win-amd64-3.9 目录下
-echo 安装包位于 dist 目录下
+echo Build completed successfully!
+echo Executable location: build\exe.win-amd64-3.9\BayesianOptimizationSystem.exe
+echo Installer location: dist\BayesianOptimizationSystem-1.0.0.msi
 
-REM 退出虚拟环境
+REM Deactivate virtual environment
 call venv\Scripts\deactivate.bat
 
 pause
