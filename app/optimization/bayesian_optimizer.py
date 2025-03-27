@@ -163,6 +163,73 @@ class BayesianOptimizer:
         
         # 拟合模型
         self.gp_model.fit(X, y_opt)
+        
+    def _fit_bootstrap(self, X, y):
+        """
+        使用Bootstrap方法拟合多个模型实例
+        
+        参数:
+            X: 特征矩阵
+            y: 目标向量
+        """
+        # 如果需要最小化，则取负值
+        y_opt = y if self.maximize else -y
+        
+        # 清空之前的Bootstrap模型
+        self.bootstrap_models = []
+        
+        # 创建随机数生成器
+        rng = np.random.RandomState(self.random_state)
+        
+        # 创建n_bootstraps个模型实例并在不同的数据子集上训练
+        for i in range(self.n_bootstraps):
+            # 使用Bootstrap重采样生成训练数据
+            X_boot, y_boot = resample(X, y_opt, random_state=rng.randint(0, 10000))
+            
+            # 克隆原始模型
+            if self.model is None:
+                raise ValueError("使用Bootstrap方法时必须提供基础模型")
+            
+            # 尝试使用sklearn的clone函数克隆模型
+            try:
+                from sklearn.base import clone
+                boot_model = clone(self.model)
+            except (ImportError, TypeError):
+                # 如果不能使用clone，则尝试直接复制模型的类
+                try:
+                    model_class = self.model.__class__
+                    boot_model = model_class(**self.model.get_params())
+                except AttributeError:
+                    # 如果上述方法都失败，则提示用户提供可克隆的模型
+                    raise ValueError("无法克隆提供的模型，请确保模型支持克隆或get_params方法")
+            
+            # 训练模型
+            boot_model.fit(X_boot, y_boot)
+            
+            # 添加到Bootstrap模型列表
+            self.bootstrap_models.append(boot_model)
+            
+    def _predict_bootstrap(self, X):
+        """
+        使用Bootstrap模型进行预测，并计算预测的均值和标准差
+        
+        参数:
+            X: 待预测的特征矩阵
+            
+        返回:
+            tuple: (预测均值, 预测标准差)
+        """
+        if not self.bootstrap_models:
+            raise ValueError("Bootstrap模型未拟合，请先调用_fit_bootstrap方法")
+        
+        # 收集所有模型的预测结果
+        predictions = np.array([model.predict(X) for model in self.bootstrap_models])
+        
+        # 计算预测均值和标准差
+        mu = np.mean(predictions, axis=0)
+        sigma = np.std(predictions, axis=0)
+        
+        return mu, sigma
     
     def _expected_improvement(self, X, X_sample, y_sample, xi=0.01):
         """
@@ -180,8 +247,14 @@ class BayesianOptimizer:
         # 获取当前最优值
         y_best = y_sample.max()
         
-        # 预测均值和标准差
-        mu, sigma = self.gp_model.predict(X, return_std=True)
+        # 根据选择的方法获取预测均值和标准差
+        if self.method == 'gp':
+            mu, sigma = self.gp_model.predict(X, return_std=True)
+        elif self.method == 'bootstrap':
+            mu, sigma = self._predict_bootstrap(X)
+        else:
+            raise ValueError(f"不支持的不确定度估计方法: {self.method}")
+            
         sigma = sigma.reshape(-1, 1)
         
         # 计算改进量
@@ -206,8 +279,14 @@ class BayesianOptimizer:
         返回:
             UCB值
         """
-        # 预测均值和标准差
-        mu, sigma = self.gp_model.predict(X, return_std=True)
+        # 根据选择的方法获取预测均值和标准差
+        if self.method == 'gp':
+            mu, sigma = self.gp_model.predict(X, return_std=True)
+        elif self.method == 'bootstrap':
+            mu, sigma = self._predict_bootstrap(X)
+        else:
+            raise ValueError(f"不支持的不确定度估计方法: {self.method}")
+            
         sigma = sigma.reshape(-1, 1)
         
         # 计算UCB
@@ -231,8 +310,14 @@ class BayesianOptimizer:
         # 获取当前最优值
         y_best = y_sample.max()
         
-        # 预测均值和标准差
-        mu, sigma = self.gp_model.predict(X, return_std=True)
+        # 根据选择的方法获取预测均值和标准差
+        if self.method == 'gp':
+            mu, sigma = self.gp_model.predict(X, return_std=True)
+        elif self.method == 'bootstrap':
+            mu, sigma = self._predict_bootstrap(X)
+        else:
+            raise ValueError(f"不支持的不确定度估计方法: {self.method}")
+            
         sigma = sigma.reshape(-1, 1)
         
         # 计算改进概率
@@ -279,16 +364,23 @@ class BayesianOptimizer:
         # 生成特征空间网格
         grid_df = self._generate_grid()
         
-        # 如果使用的是高斯过程模型，直接使用
-        if hasattr(self.model, 'kernel_') and 'GaussianProcessRegressor' in str(type(self.model)):
-            self.gp_model = self.model
-            # 如果需要最小化，则取负值
-            y_opt = y if self.maximize else -y
-            # 重新拟合模型
-            self.gp_model.fit(X, y_opt)
+        # 根据选择的方法拟合模型
+        if self.method == 'gp':
+            # 如果使用的是高斯过程模型，直接使用
+            if hasattr(self.model, 'kernel_') and 'GaussianProcessRegressor' in str(type(self.model)):
+                self.gp_model = self.model
+                # 如果需要最小化，则取负值
+                y_opt = y if self.maximize else -y
+                # 重新拟合模型
+                self.gp_model.fit(X, y_opt)
+            else:
+                # 否则，拟合新的高斯过程模型
+                self._fit_gp(X, y)
+        elif self.method == 'bootstrap':
+            # 使用Bootstrap方法拟合多个模型
+            self._fit_bootstrap(X, y)
         else:
-            # 否则，拟合新的高斯过程模型
-            self._fit_gp(X, y)
+            raise ValueError(f"不支持的不确定度估计方法: {self.method}")
         
         # 计算采样函数值
         y_opt = y if self.maximize else -y
