@@ -163,7 +163,7 @@ class ModelTrainer:
         if self.metric == 'r2':
             scoring = 'r2'
         else:  # rmse
-            scoring = make_scorer(lambda y_true, y_pred: -sqrt(mean_squared_error(y_true, y_pred)))
+            scoring = make_scorer(lambda y_true, y_pred: sqrt(mean_squared_error(y_true, y_pred)))
         
         # Train and evaluate each model
         for model_name, model in self.models.items():
@@ -192,15 +192,14 @@ class ModelTrainer:
                 # Store results
                 # 确保使用正确的键名访问评估指标
                 metric_key = self.metric
-                # 修改结果存储，添加综合评分
+                # 修改结果存储，仅保留cv_score
                 result = {
                     'model_name': model_name,
                     # 移除原始模型对象
                     'model_type': model_name,  # 改为存储模型类型名称
                     'test_score': eval_metrics[metric_key],
                     'cv_score': cv_score,
-                    'train_score': train_metrics[metric_key],
-                    'combined_score': (eval_metrics[metric_key] + cv_score) / 2
+                    'train_score': train_metrics[metric_key]
                 }
                 
                 results.append(result)
@@ -210,21 +209,20 @@ class ModelTrainer:
                 import traceback
                 print(traceback.format_exc())
         
-        # 修改排序逻辑
+        # 修改排序逻辑，仅使用cv_score
         if self.metric == 'r2':
             # 对于R2，值越大越好
-            results.sort(key=lambda x: x['combined_score'], reverse=True)
+            results.sort(key=lambda x: x['cv_score'], reverse=True)
         else:
-        # 对于RMSE，值越小越好
-            results.sort(key=lambda x: x['combined_score'], reverse=False)
+            # 对于RMSE，值越小越好
+            results.sort(key=lambda x: x['cv_score'], reverse=False)
         
         # 存储最佳模型（基于综合评分）
         if results:
-            # 存储最佳模型改为存储模型名称和类型
-            self.best_model = {
-                'name': results[0]['model_name'],
-                'type': results[0]['model_type']
-            }
+            # 存储最佳模型对象而非字典，以便可以直接调用predict方法
+            best_model_name = results[0]['model_name']
+            # 重新训练最佳模型使用全部数据
+            self.best_model = self.train_model(X, y, best_model_name)
         
         return results
     

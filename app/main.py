@@ -229,6 +229,93 @@ elif page == "特征空间定义与优化":
         if st.button("更新特征空间"):
             st.session_state.feature_ranges = feature_ranges
             st.success("特征空间已更新")
+            
+            # 计算特征空间大小和预估内存消耗
+            try:
+                # 初始化贝叶斯优化器
+                optimizer = BayesianOptimizer(
+                    model=st.session_state.model,
+                    feature_ranges=st.session_state.feature_ranges
+                )
+                
+                # 计算特征空间大小和预估内存消耗
+                total_points, memory_mb, warning = optimizer.calculate_grid_size()
+                
+                # 显示特征空间信息
+                st.info(f"特征空间总点数: {total_points:,}")
+                st.info(f"预估内存消耗: {memory_mb:.2f} MB")
+                
+                # 显示内存警告信息
+                if warning:
+                    st.warning(warning)
+                # 保留原有的警告逻辑作为备用
+                elif memory_mb > 1000:  # 超过1GB
+                    st.warning("特征空间较大，可能会导致计算速度变慢或内存不足。建议增加步长或减少特征范围。")
+            except Exception as e:
+                st.error(f"计算特征空间信息时出错: {str(e)}")
+        
+        # 自主填写特征值并获取预测结果
+        st.subheader("特征值预测")
+        st.markdown("在下方输入特征值，获取预测结果")
+        
+        # 创建多列布局用于输入特征值
+        if st.session_state.features:
+            feature_values = {}
+            cols = st.columns(3)
+            
+            for i, feature in enumerate(st.session_state.features):
+                col_idx = i % 3
+                with cols[col_idx]:
+                    # 获取当前范围作为参考
+                    current_range = st.session_state.feature_ranges.get(feature, {})
+                    min_val = current_range.get("min", 0.0)
+                    max_val = current_range.get("max", 1.0)
+                    default_val = float((min_val + max_val) / 2)  # 默认值为范围中点
+                    
+                    # 使用文本输入框输入特征值
+                    st.markdown(f"**{feature}** (范围: {min_val:.4f} - {max_val:.4f})")
+                    feature_values[feature] = float(st.text_input(
+                        f"输入{feature}的值",
+                        value=f"{default_val:.4f}",
+                        key=f"input_{feature}"
+                    ))
+            
+            # 预测按钮
+            if st.button("获取预测结果"):
+                if st.session_state.model is None:
+                    st.error("请先训练模型")
+                else:
+                    try:
+                        # 验证输入值是否为有效数字
+                        valid_input = True
+                        for feature, value in feature_values.items():
+                            try:
+                                feature_values[feature] = float(value)
+                            except (ValueError, TypeError):
+                                st.error(f"{feature}的输入值'{value}'不是有效的数字")
+                                valid_input = False
+                                break
+                        
+                        if valid_input:
+                            # 初始化贝叶斯优化器
+                            optimizer = BayesianOptimizer(
+                                model=st.session_state.model,
+                                feature_ranges=st.session_state.feature_ranges
+                            )
+                            
+                            # 获取预测结果
+                            prediction = optimizer.predict_for_features(feature_values)
+                            
+                            # 显示预测结果
+                            st.success(f"预测结果: {prediction:.4f}")
+                            
+                            # 创建包含预测结果的DataFrame用于展示
+                            result_df = pd.DataFrame([feature_values])
+                            result_df[st.session_state.target] = prediction
+                            st.dataframe(result_df)
+                    except Exception as e:
+                        st.error(f"预测时出错: {str(e)}")
+                        st.info("提示：请确保所有特征值都在有效范围内，并且格式正确。")
         
         # 贝叶斯优化设置
         st.subheader("贝叶斯优化设置")

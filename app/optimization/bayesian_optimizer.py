@@ -3,13 +3,14 @@ import pandas as pd
 from scipy.stats import norm
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import Matern, RBF, ConstantKernel
+from sklearn.utils import resample
 
 class BayesianOptimizer:
     """
     贝叶斯优化器类，用于特征空间搜索和实验推荐
     """
     
-    def __init__(self, model=None, feature_ranges=None, acquisition_function='ei', maximize=True, random_state=42):
+    def __init__(self, model=None, feature_ranges=None, acquisition_function='ei', maximize=True, random_state=42, method='gp', n_bootstraps=50):
         """
         初始化贝叶斯优化器
         
@@ -19,6 +20,8 @@ class BayesianOptimizer:
             acquisition_function: 采样函数，可选 'ei'(期望改进), 'ucb'(置信上界), 'pi'(改进概率)
             maximize: 是否最大化目标，True为最大化，False为最小化
             random_state: 随机种子
+            method: 不确定度估计方法，可选 'gp'(高斯过程) 或 'bootstrap'(Bootstrap方法)
+            n_bootstraps: 使用Bootstrap方法时的模型数量
         """
         self.model = model
         self.feature_ranges = feature_ranges
@@ -26,11 +29,78 @@ class BayesianOptimizer:
         self.maximize = maximize
         self.random_state = random_state
         self.gp_model = None
+        self.method = method.lower()
+        self.n_bootstraps = n_bootstraps
+        self.bootstrap_models = []
         
         # 验证采样函数
         valid_acq_funcs = ['ei', 'ucb', 'pi']
         if self.acquisition_function not in valid_acq_funcs:
             raise ValueError(f"不支持的采样函数: {acquisition_function}，可选: {', '.join(valid_acq_funcs)}")
+            
+        # 验证不确定度估计方法
+        valid_methods = ['gp', 'bootstrap']
+        if self.method not in valid_methods:
+            raise ValueError(f"不支持的不确定度估计方法: {method}，可选: {', '.join(valid_methods)}")
+    
+    def calculate_grid_size(self):
+        """
+        计算特征空间网格的大小，并估算内存消耗
+        
+        返回:
+            tuple: (总点数, 预估内存消耗(MB), 警告信息)
+        """
+        if not self.feature_ranges:
+            raise ValueError("未设置特征范围")
+        
+        # 计算每个特征的点数
+        points_per_feature = []
+        for feature, range_info in self.feature_ranges.items():
+            min_val = range_info['min']
+            max_val = range_info['max']
+            
+            if 'step' in range_info and range_info['step'] > 0:
+                # 使用指定的步长
+                step = range_info['step']
+                num_points = int(np.ceil((max_val - min_val) / step)) + 1
+            else:
+                # 默认使用10个点
+                num_points = 10
+            
+            points_per_feature.append(num_points)
+        
+        # 计算总点数
+        total_points = np.prod(points_per_feature)
+        
+        # 估算数据存储内存消耗 (每个浮点数8字节，再加上DataFrame的开销)
+        # 假设每个点有len(feature_ranges)个特征，加上2个额外列(预测值和采样函数值)
+        num_columns = len(self.feature_ranges) + 2
+        data_memory_bytes = total_points * num_columns * 8  # 8字节/浮点数
+        
+        # 估算高斯过程计算中的内存消耗
+        # 1. 协方差矩阵: O(n²) 大小，其中n是总点数
+        cov_matrix_bytes = total_points * total_points * 8
+        
+        # 2. 中间计算数组 (如预测均值、标准差等)
+        intermediate_arrays_bytes = total_points * 3 * 8  # 假设有3个主要中间数组
+        
+        # 3. 高斯过程模型内部使用的其他数组
+        gp_overhead_bytes = total_points * 5 * 8  # 估计值
+        
+        # 总内存消耗
+        total_memory_bytes = data_memory_bytes + cov_matrix_bytes + intermediate_arrays_bytes + gp_overhead_bytes
+        total_memory_mb = total_memory_bytes / (1024 * 1024)  # 转换为MB
+        
+        # 生成警告信息
+        warning = ""
+        if total_memory_mb > 8000:  # 超过8GB内存
+            warning = "警告: 预估内存消耗超过8GB，可能导致系统不稳定或崩溃。建议减小步长或使用批处理方式。"
+        elif total_memory_mb > 4000:  # 超过4GB内存
+            warning = "警告: 预估内存消耗较大(>4GB)，可能影响系统性能。考虑减小步长以降低内存使用。"
+        elif total_memory_mb > 2000:  # 超过2GB内存
+            warning = "提示: 预估内存消耗中等(>2GB)，在低配置机器上可能影响性能。"
+        
+        return total_points, total_memory_mb, warning
     
     def _generate_grid(self):
         """
@@ -236,6 +306,38 @@ class BayesianOptimizer:
         recommendations = sorted_grid.head(n_recommendations).reset_index(drop=True)
         
         return recommendations
+    
+    def predict_for_features(self, feature_values):
+        """
+        根据给定的特征值进行预测
+        
+        参数:
+            feature_values: 特征值字典，格式为 {feature_name: value}
+            
+        返回:
+            预测值
+        """
+        if self.model is None:
+            raise ValueError("模型未设置，无法进行预测")
+        
+        # 检查特征值是否完整
+        if self.feature_ranges is not None:
+            missing_features = [f for f in self.feature_ranges.keys() if f not in feature_values]
+            if missing_features:
+                raise ValueError(f"缺少以下特征的值: {', '.join(missing_features)}")
+        
+        # 创建输入数据框
+        input_df = pd.DataFrame([feature_values])
+        
+        # 进行预测 - 处理模型可能是字典的情况
+        if isinstance(self.model, dict) and 'name' in self.model and 'type' in self.model:
+            # 如果模型是字典格式，说明是旧版本的模型存储方式，需要提示用户重新训练模型
+            raise ValueError("模型格式不正确，请重新训练模型")
+        else:
+            # 正常情况下，模型应该是一个具有predict方法的对象
+            prediction = self.model.predict(input_df)[0]
+        
+        return prediction
     
     def update_with_new_data(self, original_data, new_data, features, target):
         """
