@@ -192,23 +192,23 @@ elif page == "模型训练与评估":
             default=["Lasso", "随机森林", "XGBoost", "SVR", "高斯过程"]
         )
         
-        # 搜索策略选择
-        st.subheader("搜索策略选择")
-        search_strategy = st.selectbox(
-            "选择优化搜索策略",
-            ["网格搜索", "遗传算法", "粒子群优化", "模拟退火", "随机搜索"],
-            index=0
-        )
+        # # 搜索策略选择
+        # st.subheader("搜索策略选择")
+        # search_strategy = st.selectbox(
+        #     "选择优化搜索策略",
+        #     ["网格搜索", "遗传算法", "粒子群优化", "模拟退火", "随机搜索"],
+        #     index=0
+        # )
         
-        # 将中文策略名称映射到英文标识符
-        strategy_mapping = {
-            "网格搜索": "grid",
-            "遗传算法": "ga",
-            "粒子群优化": "pso",
-            "模拟退火": "sa",
-            "随机搜索": "random"
-        }
-        st.session_state.search_strategy = strategy_mapping[search_strategy]
+        # # 将中文策略名称映射到英文标识符
+        # strategy_mapping = {
+        #     "网格搜索": "grid",
+        #     "遗传算法": "ga",
+        #     "粒子群优化": "pso",
+        #     "模拟退火": "sa",
+        #     "随机搜索": "random"
+        # }
+        # st.session_state.search_strategy = strategy_mapping[search_strategy]
         
         # 评估指标选择
         metric = st.radio("选择评估指标", ["R²", "RMSE"])
@@ -427,11 +427,23 @@ elif page == "特征空间定义与优化":
         st.subheader("贝叶斯优化设置")
         
         # 搜索策略选择
+        st.subheader("搜索策略选择")
         search_strategy = st.selectbox(
-            "选择搜索策略",
-            ["网格搜索", "随机搜索", "贝叶斯优化"],
+            "选择优化搜索策略",
+            ["网格搜索", "遗传算法", "粒子群优化", "模拟退火", "随机搜索"],
             index=0
         )
+        
+        # 将中文策略名称映射到英文标识符
+        strategy_mapping = {
+            "网格搜索": "grid",
+            "遗传算法": "ga",
+            "粒子群优化": "pso",
+            "模拟退火": "sa",
+            "随机搜索": "random"
+        }
+        st.session_state.search_strategy = strategy_mapping[search_strategy]
+        
         
         # 采样函数选择
         acquisition_function = st.selectbox(

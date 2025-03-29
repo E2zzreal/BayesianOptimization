@@ -1,5 +1,6 @@
 from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.metrics import mean_squared_error, r2_score, make_scorer
+from sklearn.base import clone
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.linear_model import Lasso
 from sklearn.svm import SVR
@@ -15,7 +16,7 @@ class ModelTrainer:
     A class for training and evaluating machine learning models.
     """
     
-    def __init__(self, models=None, metric='r2', cv_folds=5, test_size=0.2, random_state=42):
+    def __init__(self, models=None, metric='r2', cv_folds=5, test_size=0.2, random_state=42, n_iter=30):
         """
         Initialize the model trainer.
         
@@ -25,13 +26,37 @@ class ModelTrainer:
             cv_folds (int): Number of cross-validation folds
             test_size (float): Test set size for train-test split
             random_state (int): Random seed
+            n_iter (int): Number of iterations for Bayesian optimization
         """
         self.random_state = random_state
         self.test_size = test_size
         self.cv_folds = cv_folds
+        self.n_iter = n_iter
         # 确保metric始终为标准格式
         self.metric = 'r2' if metric in ['r2', 'r²'] else metric
         self.best_model = None
+
+        # 定义超参数空间
+        self.param_spaces = {
+            'lasso': {'alpha': (0.01, 1.0)},
+            'random_forest': {
+                'n_estimators': (50, 200),
+                'max_depth': (3, 15),
+                'min_samples_split': (2, 10)
+            },
+            'xgboost': {
+                'n_estimators': (50, 200),
+                'max_depth': (3, 10),
+                'learning_rate': (0.01, 0.3)
+            },
+            'svr': {
+                'C': (0.1, 10.0),
+                'epsilon': (0.01, 0.2)
+            },
+            'gaussian_process': {
+                'alpha': (1e-7, 1e-5)
+            }
+        }
         
         # Define available models
         self.available_models = {
@@ -67,7 +92,7 @@ class ModelTrainer:
     
     def train_model(self, X, y, model_name):
         """
-        Train a machine learning model.
+        Train a machine learning model with hyperparameter optimization
         
         Args:
             X (pd.DataFrame or np.array): Features
@@ -75,29 +100,44 @@ class ModelTrainer:
             model_name (str): Name of the model to train
             
         Returns:
-            model: Trained model
+            model: Trained model with optimized parameters
         """
+        from app.optimization.bayesian_optimizer import BayesianOptimizer
+
         model = self.models.get(model_name)
         if model is None:
             raise ValueError(f"Model {model_name} not supported")
-        
-        # Create a fresh instance to avoid retraining issues
-        if model_name == 'lasso':
-            model = Lasso(alpha=0.1, random_state=self.random_state)
-        elif model_name == 'random_forest':
-            model = RandomForestRegressor(random_state=self.random_state)
-        elif model_name == 'xgboost':
-            model = XGBRegressor(random_state=self.random_state)
-        elif model_name == 'svr':
-            model = SVR(kernel='rbf')
-        elif model_name == 'gaussian_process':
-            model = GaussianProcessRegressor(
-                kernel=ConstantKernel() * RBF(),
-                alpha=1e-6,
-                normalize_y=True,
+
+        # 获取参数空间
+        param_space = self.param_spaces.get(model_name, {})
+
+        # 定义目标函数
+        def objective(params):
+            # 克隆基础模型并设置参数
+            new_model = clone(model)
+            new_model.set_params(**params)
+            
+            # 交叉验证评估
+            scores = cross_val_score(
+                new_model, X, y,
+                cv=self.cv_folds,
+                scoring='neg_root_mean_squared_error' if self.metric == 'rmse' else 'r2'
+            )
+            return np.mean(scores)
+
+        # 执行贝叶斯优化（如果存在参数空间）
+        if param_space:
+            optimizer = BayesianOptimizer(
+                objective=objective,
+                param_space=param_space,
                 random_state=self.random_state
             )
+            best_params = optimizer.run(n_iter=self.n_iter)
             
+            # 使用优化后的参数更新模型
+            model.set_params(**best_params)
+            model.best_params_ = best_params  # 保存最佳参数
+
         # 添加特征名称处理
         if hasattr(model, 'feature_names_in_'):
             try:

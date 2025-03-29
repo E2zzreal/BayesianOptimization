@@ -270,7 +270,7 @@ class BayesianOptimizer:
             raise ValueError("未设置特征范围")
         
         grid_points = []
-        feature_names = list(self.feature_ranges.keys())  # 确保特征顺序一致
+        feature_names = self.search_strategy.feature_names if hasattr(self.search_strategy, 'feature_names') else list(self.feature_ranges.keys())
         
         # 为每个特征生成网格点
         for feature in feature_names:
@@ -290,8 +290,7 @@ class BayesianOptimizer:
         
         # 生成网格
         mesh = np.meshgrid(*grid_points, indexing='ij')
-        grid = np.vstack([m.ravel() for m in mesh]).T
-        grid = np.unique(grid, axis=0)  # 去除重复点
+        grid = np.column_stack([m.flatten() for m in mesh])
         
         # 转换为DataFrame
         grid_df = pd.DataFrame(grid, columns=feature_names)

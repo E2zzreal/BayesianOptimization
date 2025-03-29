@@ -281,8 +281,8 @@ class GridSearch(SearchStrategy):
             grid_points.append(points)
         
         # 生成网格
-        mesh = np.meshgrid(*grid_points, indexing='ij')  # 使用'ij'索引确保维度顺序一致
-        grid = np.column_stack([m.flatten() for m in mesh])
+        mesh = np.meshgrid(*grid_points)
+        grid = np.vstack([m.ravel() for m in mesh]).T
         
         # 转换为DataFrame
         grid_df = pd.DataFrame(grid, columns=self.feature_names)
