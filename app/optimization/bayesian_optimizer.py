@@ -8,6 +8,10 @@ from app.optimization.search_strategies import (
     SearchStrategy, GridSearch, GeneticAlgorithm, 
     ParticleSwarmOptimization, SimulatedAnnealing, RandomSearch
 )
+from app.optimization.search_strategies import (
+    SearchStrategy, GridSearch, GeneticAlgorithm, 
+    ParticleSwarmOptimization, SimulatedAnnealing, RandomSearch
+)
 
 class BayesianOptimizer:
     """
@@ -15,6 +19,7 @@ class BayesianOptimizer:
     """
     
     def __init__(self, model=None, feature_ranges=None, acquisition_function='ei', maximize=True, random_state=42, method=None, n_bootstraps=50, search_strategy='grid'):
+
         """
         初始化贝叶斯优化器
         
@@ -290,7 +295,8 @@ class BayesianOptimizer:
         
         # 生成网格
         mesh = np.meshgrid(*grid_points, indexing='ij')
-        grid = np.column_stack([m.flatten() for m in mesh])
+        grid = np.vstack([m.ravel() for m in mesh]).T
+        grid = np.unique(grid, axis=0)  # 去除重复点
         
         # 转换为DataFrame
         grid_df = pd.DataFrame(grid, columns=feature_names)

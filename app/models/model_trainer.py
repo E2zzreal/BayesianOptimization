@@ -54,7 +54,9 @@ class ModelTrainer:
                 'epsilon': (0.01, 0.2)
             },
             'gaussian_process': {
-                'alpha': (1e-7, 1e-5)
+                'alpha': (1e-7, 1e-5),
+                'kernel__k1__constant_value': (0.5, 2.0),  # RBF核参数
+                'kernel__k2__lengthscale': (0.1, 1.0)
             }
         }
         
@@ -102,51 +104,60 @@ class ModelTrainer:
         Returns:
             model: Trained model with optimized parameters
         """
-        from app.optimization.bayesian_optimizer import BayesianOptimizer
-
-        model = self.models.get(model_name)
-        if model is None:
-            raise ValueError(f"Model {model_name} not supported")
-
-        # 获取参数空间
-        param_space = self.param_spaces.get(model_name, {})
-
-        # 定义目标函数
-        def objective(params):
-            # 克隆基础模型并设置参数
-            new_model = clone(model)
-            new_model.set_params(**params)
-            
-            # 交叉验证评估
-            scores = cross_val_score(
-                new_model, X, y,
-                cv=self.cv_folds,
-                scoring='neg_root_mean_squared_error' if self.metric == 'rmse' else 'r2'
-            )
-            return np.mean(scores)
-
-        # 执行贝叶斯优化（如果存在参数空间）
-        if param_space:
-            optimizer = BayesianOptimizer(
-                objective=objective,
-                param_space=param_space,
-                random_state=self.random_state
-            )
-            best_params = optimizer.run(n_iter=self.n_iter)
-            
-            # 使用优化后的参数更新模型
-            model.set_params(**best_params)
-            model.best_params_ = best_params  # 保存最佳参数
-
-        # 添加特征名称处理
-        if hasattr(model, 'feature_names_in_'):
-            try:
-                model.feature_names_in_ = X.columns.tolist()
-            except AttributeError:
-                pass
+        import logging
+        logger = logging.getLogger(__name__)
         
-        model.fit(X, y)
-        return model
+        try:
+            from app.optimization.bayesian_optimizer import BayesianOptimizer
+
+            model = self.models.get(model_name)
+            if model is None:
+                raise ValueError(f"Model {model_name} not supported")
+
+            # 获取参数空间
+            param_space = self.param_spaces.get(model_name, {})
+
+            # 定义目标函数
+            def objective(params):
+                # 克隆基础模型并设置参数
+                new_model = clone(model)
+                new_model.set_params(**params)
+                
+                # 交叉验证评估
+                scores = cross_val_score(
+                    new_model, X, y,
+                    cv=self.cv_folds,
+                    scoring='neg_root_mean_squared_error' if self.metric == 'rmse' else 'r2'
+                )
+                return np.mean(scores)
+
+            # 执行贝叶斯优化（如果存在参数空间）
+            if param_space:
+                optimizer = BayesianOptimizer(
+                    objective=objective,
+                    param_space=param_space,
+                    random_state=self.random_state
+                )
+                best_params = optimizer.run(n_iter=self.n_iter)
+                
+                # 使用优化后的参数更新模型
+                model.set_params(**best_params)
+                model.best_params_ = best_params  # 保存最佳参数
+
+            # 添加特征名称处理
+            if hasattr(model, 'feature_names_in_'):
+                try:
+                    model.feature_names_in_ = X.columns.tolist()
+                except AttributeError:
+                    pass
+            
+            model.fit(X, y)
+            logger.info(f"Successfully trained model: {model_name}")
+            return model
+            
+        except Exception as e:
+            logger.error(f"Error training model {model_name}: {str(e)}", exc_info=True)
+            raise
     
     def evaluate_model(self, model, X_test, y_test):
         """
@@ -194,77 +205,86 @@ class ModelTrainer:
         Returns:
             list: List of dictionaries with model results
         """
+        import logging
+        logger = logging.getLogger(__name__)
+        
         results = []
         
-        # Split data
-        X_train, X_test, y_train, y_test = self.train_test_split(X, y)
-        
-        # Define scoring metric for cross-validation
-        if self.metric == 'r2':
-            scoring = 'r2'
-        else:  # rmse
-            scoring = make_scorer(lambda y_true, y_pred: sqrt(mean_squared_error(y_true, y_pred)))
-        
-        # Train and evaluate each model
-        for model_name, model in self.models.items():
-            try:
-                # Train model
-                trained_model = self.train_model(X_train, y_train, model_name)
-                
-                # Evaluate on test set
-                eval_metrics = self.evaluate_model(trained_model, X_test, y_test)
-                
-                # Cross-validation
-                cv_scores = cross_val_score(
-                    model, X, y, 
-                    cv=self.cv_folds, 
-                    scoring=scoring
-                )
-                
-                # Calculate mean CV score
-                cv_score = np.mean(cv_scores)
-                if self.metric == 'rmse':
-                    cv_score = -cv_score  # Convert back from negative RMSE
-                
-                # Evaluate on training set
-                train_metrics = self.evaluate_model(trained_model, X_train, y_train)
-                
-                # Store results
-                # 确保使用正确的键名访问评估指标
-                metric_key = self.metric
-                # 修改结果存储，仅保留cv_score
-                result = {
-                    'model_name': model_name,
-                    # 移除原始模型对象
-                    'model_type': model_name,  # 改为存储模型类型名称
-                    'test_score': eval_metrics[metric_key],
-                    'cv_score': cv_score,
-                    'train_score': train_metrics[metric_key]
-                }
-                
-                results.append(result)
-                
-            except Exception as e:
-                print(f"Error training {model_name}: {str(e)}")
-                import traceback
-                print(traceback.format_exc())
-        
-        # 修改排序逻辑，仅使用cv_score
-        if self.metric == 'r2':
-            # 对于R2，值越大越好
-            results.sort(key=lambda x: x['cv_score'], reverse=True)
-        else:
-            # 对于RMSE，值越小越好
-            results.sort(key=lambda x: x['cv_score'], reverse=False)
-        
-        # 存储最佳模型（基于综合评分）
-        if results:
-            # 存储最佳模型对象而非字典，以便可以直接调用predict方法
-            best_model_name = results[0]['model_name']
-            # 重新训练最佳模型使用全部数据
-            self.best_model = self.train_model(X, y, best_model_name)
-        
-        return results
+        try:
+            # Split data
+            X_train, X_test, y_train, y_test = self.train_test_split(X, y)
+            
+            # Define scoring metric for cross-validation
+            if self.metric == 'r2':
+                scoring = 'r2'
+            else:  # rmse
+                scoring = make_scorer(lambda y_true, y_pred: sqrt(mean_squared_error(y_true, y_pred)))
+            
+            # Train and evaluate each model
+            for model_name, model in self.models.items():
+                try:
+                    # Train model
+                    trained_model = self.train_model(X_train, y_train, model_name)
+                    
+                    # Evaluate on test set
+                    eval_metrics = self.evaluate_model(trained_model, X_test, y_test)
+                    
+                    # Cross-validation
+                    cv_scores = cross_val_score(
+                        trained_model, X, y,  # 使用训练后的模型
+                        cv=self.cv_folds,
+                        scoring=scoring
+                    )
+                    
+                    # Calculate mean CV score
+                    cv_score = np.mean(cv_scores)
+                    if self.metric == 'rmse':
+                        cv_score = -cv_score  # Convert back from negative RMSE
+                    
+                    # Evaluate on training set
+                    train_metrics = self.evaluate_model(trained_model, X_train, y_train)
+                    
+                    # Store results
+                    # 确保使用正确的键名访问评估指标
+                    metric_key = self.metric
+                    # 修改结果存储，仅保留cv_score
+                    result = {
+                        'model_name': model_name,
+                        # 移除原始模型对象
+                        'model_type': model_name,  # 改为存储模型类型名称
+                        'test_score': eval_metrics[metric_key],
+                        'cv_score': cv_score,
+                        'train_score': train_metrics[metric_key]
+                    }
+                    
+                    results.append(result)
+                    logger.info(f"Successfully trained and evaluated model: {model_name}")
+                    
+                except Exception as e:
+                    logger.error(f"Error training model {model_name}: {str(e)}", exc_info=True)
+                    continue
+            
+            # 修改排序逻辑，仅使用cv_score
+            if self.metric == 'r2':
+                # 对于R2，值越大越好
+                results.sort(key=lambda x: x['cv_score'], reverse=True)
+            else:
+                # 对于RMSE，值越小越好
+                results.sort(key=lambda x: x['cv_score'], reverse=False)
+            
+            # 存储最佳模型（基于综合评分）
+            if results:
+                # 存储最佳模型对象而非字典，以便可以直接调用predict方法
+                best_model_name = results[0]['model_name']
+                # 重新训练最佳模型使用全部数据
+                self.best_model = self.train_model(X, y, best_model_name)
+                logger.info(f"Selected best model: {best_model_name}")
+            
+            return results
+            
+        except Exception as e:
+            logger.error(f"Error in train_and_evaluate: {str(e)}", exc_info=True)
+            raise
     
     def get_best_model(self):
         """
