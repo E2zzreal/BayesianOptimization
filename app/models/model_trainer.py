@@ -37,26 +37,28 @@ class ModelTrainer:
         self.best_model = None
 
         # 定义超参数空间
+        from scipy.stats import uniform, loguniform, randint
+        
         self.param_spaces = {
-            'lasso': {'alpha': (0.01, 1.0)},
+            'lasso': {'alpha': loguniform(0.01, 1.0)},
             'random_forest': {
-                'n_estimators': (50, 200),
-                'max_depth': (3, 15),
-                'min_samples_split': (2, 10)
+                'n_estimators': randint(50, 200),
+                'max_depth': randint(3, 15),
+                'min_samples_split': randint(2, 10)
             },
             'xgboost': {
-                'n_estimators': (50, 200),
-                'max_depth': (3, 10),
-                'learning_rate': (0.01, 0.3)
+                'n_estimators': randint(50, 200),
+                'max_depth': randint(3, 10),
+                'learning_rate': loguniform(0.01, 0.3)
             },
             'svr': {
-                'C': (0.1, 10.0),
-                'epsilon': (0.01, 0.2)
+                'C': loguniform(0.1, 10.0),
+                'epsilon': loguniform(0.01, 0.2)
             },
             'gaussian_process': {
-                'alpha': (1e-7, 1e-5),
-                'kernel__k1__constant_value': (0.5, 2.0),  # RBF核参数
-                'kernel__k2__lengthscale': (0.1, 1.0)
+                'alpha': loguniform(1e-11, 1e-3),
+                'kernel__k1__constant_value': uniform(0.5, 1.5),  # ConstantKernel参数
+                'kernel__k2__length_scale': uniform(0.1, 1.5)  # RBF核参数
             }
         }
         
@@ -228,7 +230,7 @@ class ModelTrainer:
                     # Calculate mean CV score
                     cv_score = np.mean(cv_scores)
                     if self.metric == 'rmse':
-                        cv_score = -cv_score  # Convert back from negative RMSE
+                        cv_score = cv_score  # Convert back from negative RMSE
                     
                     # Evaluate on training set
                     train_metrics = self.evaluate_model(trained_model, X_train, y_train)

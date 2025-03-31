@@ -244,7 +244,7 @@ elif page == "模型训练与评估":
                     # 注意：这里应该使用cv_score而不是test_score来保持与ModelTrainer中选择最佳模型的逻辑一致
                     results_df = pd.DataFrame(results).sort_values(
                         by="cv_score", 
-                        ascending=False if metric == "RMSE" else True
+                        ascending=True if metric.lower() == "rmse" else False
                     )
                     
                     # 格式化结果
@@ -516,7 +516,10 @@ elif page == "特征空间定义与优化":
                     )
                     
                 except Exception as e:
-                    st.error(f"生成实验推荐时出错: {str(e)}")
+                    error_msg = f"生成实验推荐时出错: {str(e)}"
+                    logger.error(error_msg, exc_info=True)  # 记录完整错误信息到日志
+                    st.error(error_msg)
+                    st.error("详细错误信息已记录到日志文件")
 
 # 迭代优化页面
 elif page == "迭代优化":
