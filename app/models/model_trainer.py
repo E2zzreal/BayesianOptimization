@@ -108,7 +108,7 @@ class ModelTrainer:
         logger = logging.getLogger(__name__)
         
         try:
-            from app.optimization.bayesian_optimizer import BayesianOptimizer
+            from sklearn.model_selection import RandomizedSearchCV
 
             model = self.models.get(model_name)
             if model is None:
@@ -117,32 +117,21 @@ class ModelTrainer:
             # 获取参数空间
             param_space = self.param_spaces.get(model_name, {})
 
-            # 定义目标函数
-            def objective(params):
-                # 克隆基础模型并设置参数
-                new_model = clone(model)
-                new_model.set_params(**params)
-                
-                # 交叉验证评估
-                scores = cross_val_score(
-                    new_model, X, y,
-                    cv=self.cv_folds,
-                    scoring='neg_root_mean_squared_error' if self.metric == 'rmse' else 'r2'
-                )
-                return np.mean(scores)
-
-            # 执行贝叶斯优化（如果存在参数空间）
+            # 使用RandomizedSearchCV进行随机搜索
             if param_space:
-                optimizer = BayesianOptimizer(
-                    objective=objective,
-                    param_space=param_space,
-                    random_state=self.random_state
+                scoring = 'neg_root_mean_squared_error' if self.metric == 'rmse' else 'r2'
+                random_search = RandomizedSearchCV(
+                    estimator=model,
+                    param_distributions=param_space,
+                    n_iter=self.n_iter,
+                    cv=self.cv_folds,
+                    scoring=scoring,
+                    random_state=self.random_state,
+                    n_jobs=-1
                 )
-                best_params = optimizer.run(n_iter=self.n_iter)
-                
-                # 使用优化后的参数更新模型
-                model.set_params(**best_params)
-                model.best_params_ = best_params  # 保存最佳参数
+                random_search.fit(X, y)
+                model = random_search.best_estimator_
+                model.best_params_ = random_search.best_params_
 
             # 添加特征名称处理
             if hasattr(model, 'feature_names_in_'):
