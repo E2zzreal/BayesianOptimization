@@ -17,9 +17,14 @@ class SearchStrategy(ABC):
             feature_ranges: 特征范围字典，格式为 {feature_name: {'min': min_val, 'max': max_val, 'step': step_val}}
             random_state: 随机种子
         """
+        if not isinstance(feature_ranges, dict):
+            raise TypeError("feature_ranges 必须是字典类型")
         self.feature_ranges = feature_ranges
         self.random_state = random_state
         self.feature_names = list(feature_ranges.keys())
+        if len(self.feature_names) != len(feature_ranges):
+             # This should theoretically not happen if feature_ranges is a dict
+             raise ValueError("特征名称列表长度与特征范围字典长度不匹配。")
         np.random.seed(random_state)
         random.seed(random_state)
     
@@ -132,8 +137,8 @@ class RandomSearch(SearchStrategy):
         # 使用模型预测目标值
         random_points['predicted_value'] = model.predict(random_points)
         
-        # 计算采集函数值
-        random_points['acquisition_value'] = acquisition_func(random_points.values)
+        # 计算采集函数值 (只传递特征列)
+        random_points['acquisition_value'] = acquisition_func(random_points[self.feature_names].values)
         
         # 根据采集函数值排序
         sorted_points = random_points.sort_values('acquisition_value', ascending=False)
@@ -176,8 +181,8 @@ class GridSearch(SearchStrategy):
         # 使用模型预测目标值
         grid_df['predicted_value'] = model.predict(grid_df)
         
-        # 计算采集函数值
-        grid_df['acquisition_value'] = acquisition_func(grid_df.values)
+        # 计算采集函数值 (只传递特征列)
+        grid_df['acquisition_value'] = acquisition_func(grid_df[self.feature_names].values)
         
         # 根据采集函数值排序
         sorted_grid = grid_df.sort_values('acquisition_value', ascending=False)
@@ -332,9 +337,9 @@ class GeneticAlgorithm(SearchStrategy):
         
         # 迭代进化
         for generation in range(self.n_generations):
-            # 计算适应度
-            population['predicted_value'] = model.predict(population)
-            population['fitness'] = acquisition_func(population.values)
+            # 计算适应度 (只传递特征列)
+            population['predicted_value'] = model.predict(population[self.feature_names]) # 预测也应只用特征列
+            population['fitness'] = acquisition_func(population[self.feature_names].values)
             
             # 选择父代
             parents = self._selection(population)
@@ -346,9 +351,9 @@ class GeneticAlgorithm(SearchStrategy):
             # 更新种群
             population = offspring
         
-        # 计算最终种群的适应度
-        population['predicted_value'] = model.predict(population)
-        population['acquisition_value'] = acquisition_func(population.values)
+        # 计算最终种群的适应度 (只传递特征列)
+        population['predicted_value'] = model.predict(population[self.feature_names]) # 预测也应只用特征列
+        population['acquisition_value'] = acquisition_func(population[self.feature_names].values)
         
         # 根据适应度排序
         sorted_population = population.sort_values('acquisition_value', ascending=False)
@@ -506,9 +511,9 @@ class ParticleSwarmOptimization(SearchStrategy):
         particles = self._random_sample(self.n_particles)
         velocities = self._initialize_velocities()
         
-        # 初始化个体最优位置和适应度
-        particles['predicted_value'] = model.predict(particles)
-        particles['fitness'] = acquisition_func(particles.values)
+        # 初始化个体最优位置和适应度 (只传递特征列)
+        particles['predicted_value'] = model.predict(particles[self.feature_names]) # 预测也应只用特征列
+        particles['fitness'] = acquisition_func(particles[self.feature_names].values)
         pbest_positions = particles[self.feature_names].copy()
         pbest_fitness = particles['fitness'].copy()
         
@@ -548,9 +553,9 @@ class ParticleSwarmOptimization(SearchStrategy):
                         particles.loc[i, feature] = max_val
                         velocities.loc[i, feature] *= -0.5  # 反弹
             
-            # 计算新位置的适应度
-            particles['predicted_value'] = model.predict(particles)
-            particles['fitness'] = acquisition_func(particles.values)
+            # 计算新位置的适应度 (只传递特征列)
+            particles['predicted_value'] = model.predict(particles[self.feature_names]) # 预测也应只用特征列
+            particles['fitness'] = acquisition_func(particles[self.feature_names].values)
             
             # 更新个体最优
             for i in range(self.n_particles):
@@ -674,10 +679,10 @@ class SimulatedAnnealing(SearchStrategy):
         返回:
             搜索结果的DataFrame
         """
-        # 初始化当前解
+        # 初始化当前解 (只传递特征列)
         current_solution = self._random_sample(1)
-        current_solution['predicted_value'] = model.predict(current_solution)
-        current_solution['acquisition_value'] = acquisition_func(current_solution.values)
+        current_solution['predicted_value'] = model.predict(current_solution[self.feature_names]) # 预测也应只用特征列
+        current_solution['acquisition_value'] = acquisition_func(current_solution[self.feature_names].values)
         current_fitness = current_solution['acquisition_value'].values[0]
         
         # 初始化最优解
@@ -693,10 +698,10 @@ class SimulatedAnnealing(SearchStrategy):
         
         # 迭代优化
         for iteration in range(self.n_iterations):
-            # 生成邻居解
+            # 生成邻居解 (只传递特征列)
             neighbors = self._generate_neighbors(current_solution)
-            neighbors['predicted_value'] = model.predict(neighbors)
-            neighbors['acquisition_value'] = acquisition_func(neighbors.values)
+            neighbors['predicted_value'] = model.predict(neighbors[self.feature_names]) # 预测也应只用特征列
+            neighbors['acquisition_value'] = acquisition_func(neighbors[self.feature_names].values)
             
             # 选择最佳邻居
             best_neighbor_idx = neighbors['acquisition_value'].idxmax()
