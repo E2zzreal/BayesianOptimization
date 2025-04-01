@@ -5,7 +5,6 @@ import numpy as np      # NumPy用于数值计算
 import os               # 操作系统接口
 import sys              # 系统相关功能
 import logging          # 日志记录
-import traceback        # 异常跟踪
 from pathlib import Path  # 路径操作工具
 from datetime import datetime  # 日期时间处理
 
@@ -51,13 +50,17 @@ def setup_logging():
 
 # 初始化日志系统
 logger = setup_logging()
-logger.info("贝叶斯优化材料组分系统启动中...")
+
+# 检查是否已经记录过启动信息
+if 'app_started_logged' not in st.session_state:
+    logger.info("贝叶斯优化材料组分系统启动中...")
+    # 标记为已记录
+    st.session_state.app_started_logged = True
 
 # 导入自定义模块
 from app.utils.data_processor import DataProcessor  # 数据处理工具类
 from app.models.model_trainer import ModelTrainer    # 模型训练和评估类
 from app.optimization.bayesian_optimizer import BayesianOptimizer  # 贝叶斯优化器类
-from sklearn.preprocessing import StandardScaler # 导入 StandardScaler 用于类型检查
 
 # 设置页面配置
 st.set_page_config(
@@ -443,9 +446,43 @@ elif page == "搜索推荐":
             "模拟退火": "sa",
             "随机搜索": "random"
         }
-        # 不直接修改 session_state，在需要时读取
-        # st.session_state.search_strategy = strategy_mapping[search_strategy]
+        selected_strategy_key = strategy_mapping[search_strategy] # 获取映射后的策略键
 
+        # --- 高级搜索策略参数输入 ---
+        strategy_params = {}
+        if selected_strategy_key == 'ga':
+            st.subheader("遗传算法参数")
+            cols_ga = st.columns(2)
+            with cols_ga[0]:
+                strategy_params['population_size'] = st.number_input("种群大小 (population_size)", min_value=10, value=50, step=10, key="ga_pop_size")
+                strategy_params['crossover_prob'] = st.slider("交叉概率 (crossover_prob)", 0.0, 1.0, 0.8, 0.05, key="ga_cross_prob")
+            with cols_ga[1]:
+                strategy_params['n_generations'] = st.number_input("迭代代数 (n_generations)", min_value=1, value=10, step=1, key="ga_gens")
+                strategy_params['mutation_prob'] = st.slider("变异概率 (mutation_prob)", 0.0, 1.0, 0.2, 0.05, key="ga_mut_prob")
+        elif selected_strategy_key == 'pso':
+            st.subheader("粒子群优化参数")
+            cols_pso1 = st.columns(3)
+            with cols_pso1[0]:
+                strategy_params['n_particles'] = st.number_input("粒子数量 (n_particles)", min_value=5, value=30, step=5, key="pso_particles")
+            with cols_pso1[1]:
+                strategy_params['n_iterations'] = st.number_input("迭代次数 (n_iterations)", min_value=5, value=20, step=5, key="pso_iters")
+            with cols_pso1[2]:
+                 strategy_params['inertia_weight'] = st.number_input("惯性权重 (inertia_weight)", min_value=0.0, value=0.5, step=0.1, format="%.2f", key="pso_inertia")
+            cols_pso2 = st.columns(2)
+            with cols_pso2[0]:
+                strategy_params['cognitive_weight'] = st.number_input("认知权重 (cognitive_weight)", min_value=0.0, value=1.5, step=0.1, format="%.2f", key="pso_cog")
+            with cols_pso2[1]:
+                strategy_params['social_weight'] = st.number_input("社会权重 (social_weight)", min_value=0.0, value=1.5, step=0.1, format="%.2f", key="pso_soc")
+        elif selected_strategy_key == 'sa':
+            st.subheader("模拟退火参数")
+            cols_sa = st.columns(2)
+            with cols_sa[0]:
+                strategy_params['n_iterations'] = st.number_input("迭代次数 (n_iterations)", min_value=10, value=100, step=10, key="sa_iters")
+                strategy_params['initial_temp'] = st.number_input("初始温度 (initial_temp)", min_value=1.0, value=100.0, step=10.0, format="%.1f", key="sa_temp")
+            with cols_sa[1]:
+                strategy_params['cooling_rate'] = st.slider("冷却率 (cooling_rate)", 0.8, 0.99, 0.95, 0.01, format="%.2f", key="sa_cool")
+                strategy_params['n_neighbors'] = st.number_input("邻居数量 (n_neighbors)", min_value=1, value=5, step=1, key="sa_neighbors")
+        # --- END ---
 
         # 采样函数选择
         acquisition_function = st.selectbox(
@@ -501,7 +538,8 @@ elif page == "搜索推荐":
                             maximize=(optimization_direction == "最大化"),
                             method=None,  # 设为None，让优化器自动选择合适的方法
                             n_bootstraps=st.session_state.n_bootstraps, # 从会话状态读取
-                            search_strategy=strategy_mapping[search_strategy], # 使用映射后的值
+                            search_strategy=selected_strategy_key, # 使用映射后的值
+                            search_strategy_params=strategy_params, # 传递策略参数
                             scaler=st.session_state.data_processor.scaler # 传入 scaler
                         )
 

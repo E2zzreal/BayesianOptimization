@@ -65,7 +65,7 @@ if %ERRORLEVEL% neq 0 (
 
 echo.
 echo Build completed successfully!
-echo Executable location: build\exe.win-amd64-3.9\BayesianOptimizationSystem.exe
+echo Executable location: build\exe.win-amd64-3.9\贝叶斯优化材料组分系统.exe
 echo Installer location: dist\BayesianOptimizationSystem-1.0.0.msi
 
 REM Deactivate virtual environment

@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 from scipy.stats import norm
 from sklearn.gaussian_process import GaussianProcessRegressor
-from sklearn.gaussian_process.kernels import Matern, RBF, ConstantKernel
+from sklearn.gaussian_process.kernels import Matern, ConstantKernel
 from sklearn.utils import resample
 from app.optimization.search_strategies import (
     SearchStrategy, GridSearch, GeneticAlgorithm,
@@ -18,10 +18,10 @@ from sklearn.preprocessing import StandardScaler # 导入 StandardScaler 用于�
 
 class BayesianOptimizer:
     """
-    贝叶斯优化器类，用于特征空间搜索和实验推荐
-    """
+     贝叶斯优化器类，用于特征空间搜索和实验推荐
+     """
 
-    def __init__(self, model=None, feature_ranges=None, acquisition_function='ei', maximize=True, random_state=42, method=None, n_bootstraps=50, search_strategy='grid', scaler=None):
+    def __init__(self, model=None, feature_ranges=None, acquisition_function='ei', maximize=True, random_state=42, method=None, n_bootstraps=50, search_strategy='grid', search_strategy_params=None, scaler=None): # 添加 search_strategy_params
         """
         初始化贝叶斯优化器
 
@@ -35,18 +35,20 @@ class BayesianOptimizer:
                    如果为None，则根据模型类型自动选择合适的方法
             n_bootstraps: 使用Bootstrap方法或随机森林方法时的模型/树数量
             search_strategy: 特征空间搜索策略，可选 'grid'(网格搜索), 'ga'(遗传算法), 'pso'(粒子群优化),
-                            'sa'(模拟退火), 'random'(随机搜索)，或者直接传入SearchStrategy的实例
-            scaler: 用于特征缩放的 scikit-learn scaler 对象 (例如 StandardScaler)
-        """
+                             'sa'(模拟退火), 'random'(随机搜索)，或者直接传入SearchStrategy的实例
+             search_strategy_params: 包含高级搜索策略参数的字典 (可选)
+             scaler: 用于特征缩放的 scikit-learn scaler 对象 (例如 StandardScaler)
+         """
         self.model = model
         self.feature_ranges = feature_ranges
         self.acquisition_function = acquisition_function.lower()
-        self.maximize = maximize
-        self.random_state = random_state
+        self.maximize = maximize # Fix indentation
+        self.random_state = random_state # Fix indentation
         self.gp_model = None
         self.n_bootstraps = n_bootstraps
-        self.bootstrap_models = []
-        self.scaler = scaler # 存储传入的 scaler
+        self.bootstrap_models = [] # Fix indentation
+        self.search_strategy_params = search_strategy_params if isinstance(search_strategy_params, dict) else {} # Fix indentation
+        self.scaler = scaler # Fix indentation
 
         # --- START FEATURE COUNT VALIDATION ---
         if not isinstance(feature_ranges, dict):
@@ -126,11 +128,12 @@ class BayesianOptimizer:
             if strategy_name == 'grid':
                 return GridSearch(self.feature_ranges, self.random_state)
             elif strategy_name == 'ga':
-                return GeneticAlgorithm(self.feature_ranges, self.random_state)
+                # 使用 ** 解包传递参数，如果参数字典中没有对应键，则使用类定义的默认值
+                return GeneticAlgorithm(self.feature_ranges, self.random_state, **self.search_strategy_params)
             elif strategy_name == 'pso':
-                return ParticleSwarmOptimization(self.feature_ranges, self.random_state)
+                return ParticleSwarmOptimization(self.feature_ranges, self.random_state, **self.search_strategy_params)
             elif strategy_name == 'sa':
-                return SimulatedAnnealing(self.feature_ranges, self.random_state)
+                return SimulatedAnnealing(self.feature_ranges, self.random_state, **self.search_strategy_params)
             elif strategy_name == 'random':
                 return RandomSearch(self.feature_ranges, self.random_state)
             else:

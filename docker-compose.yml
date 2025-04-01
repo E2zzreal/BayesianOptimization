@@ -1,5 +1,3 @@
-version: '3'
-
 services:
   bayesian-optimizer:
     build:
@@ -9,6 +7,7 @@ services:
       - "8501:8501"
     volumes:
       - ./data:/app/data
+      - ./logs:/app/logs
     environment:
       - PYTHONPATH=/app
       - STREAMLIT_SERVER_PORT=8501
