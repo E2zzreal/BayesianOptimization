@@ -199,62 +199,83 @@ class ModelTrainer:
         logger = logging.getLogger(__name__)
         
         results = []
-        
+        best_models_params = {} # Store best params found for each model on full data
+
         try:
-            # Split data
-            X_train, X_test, y_train, y_test = self.train_test_split(X, y)
-            
-            # Define scoring metric for cross-validation
+            # Define scoring metric based on self.metric for RandomizedSearchCV
             if self.metric == 'r2':
                 scoring = 'r2'
-            else:  # rmse
-                scoring = make_scorer(lambda y_true, y_pred: sqrt(mean_squared_error(y_true, y_pred)))
-            
-            # Train and evaluate each model
-            for model_name, model in self.models.items():
+            elif self.metric == 'rmse':
+                # Use scikit-learn's built-in neg_root_mean_squared_error
+                scoring = 'neg_root_mean_squared_error'
+            else:
+                # Fallback or raise error for unsupported metrics
+                scoring = 'r2' # Defaulting to r2, consider raising error
+                logger.warning(f"Unsupported metric '{self.metric}', defaulting to 'r2' for scoring.")
+
+            # Train and evaluate each model using RandomizedSearchCV on the full dataset
+            for model_name, base_model in self.models.items():
                 try:
-                    # Train model
-                    trained_model = self.train_model(X_train, y_train, model_name)
-                    
-                    # Evaluate on test set
-                    eval_metrics = self.evaluate_model(trained_model, X_test, y_test)
-                    
-                    # Cross-validation
-                    cv_scores = cross_val_score(
-                        trained_model, X, y,  # 使用训练后的模型
-                        cv=self.cv_folds,
-                        scoring=scoring
-                    )
-                    
-                    # Calculate mean CV score
-                    cv_score = np.mean(cv_scores)
-                    if self.metric == 'rmse':
-                        cv_score = cv_score  # Convert back from negative RMSE
-                    
-                    # Evaluate on training set
-                    train_metrics = self.evaluate_model(trained_model, X_train, y_train)
-                    
-                    # Store results
-                    # 确保使用正确的键名访问评估指标
-                    metric_key = self.metric
-                    # 修改结果存储，仅保留cv_score
+                    logger.info(f"Starting RandomizedSearchCV for {model_name} on the full dataset...")
+                    from sklearn.model_selection import RandomizedSearchCV
+
+                    # Get param space for the current model
+                    param_space = self.param_spaces.get(model_name, {})
+
+                    if not param_space:
+                         logger.warning(f"No hyperparameter space defined for {model_name}. Skipping RandomizedSearchCV, using default parameters.")
+                         # If no param space, train with default params and estimate CV score differently?
+                         # For now, we'll proceed but CV score might not be comparable if search wasn't done.
+                         # Option: Perform simple cross_val_score with default model
+                         cv_scores = cross_val_score(base_model, X, y, cv=self.cv_folds, scoring=scoring, n_jobs=-1)
+                         cv_score = np.mean(cv_scores)
+                         best_params = base_model.get_params() # Use default params
+                         # Need to handle negative scores if using neg_rmse
+                         if scoring == 'neg_root_mean_squared_error':
+                             cv_score = -cv_score
+                    else:
+                        # Perform Randomized Search CV on the *entire* dataset (X, y)
+                        random_search = RandomizedSearchCV(
+                            estimator=base_model,
+                            param_distributions=param_space,
+                            n_iter=self.n_iter,
+                            cv=self.cv_folds, # Inner CV loop for hyperparameter tuning
+                            scoring=scoring,
+                            random_state=self.random_state,
+                            n_jobs=-1,
+                            refit=False # We don't need the refitted model from here, just the score and params
+                        )
+                        random_search.fit(X, y)
+
+                        # Use the best score found during the search as the CV score
+                        cv_score = random_search.best_score_
+                        best_params = random_search.best_params_
+
+                        # Handle negative scores if using neg_rmse or similar
+                        if scoring == 'neg_root_mean_squared_error':
+                            cv_score = -cv_score # Convert back to positive RMSE
+
+                        logger.info(f"RandomizedSearchCV completed for {model_name}. Best CV Score ({self.metric}): {cv_score:.4f}")
+
+                    # Store results - only model name and its CV score
                     result = {
                         'model_name': model_name,
-                        # 移除原始模型对象
-                        'model_type': model_name,  # 改为存储模型类型名称
-                        'test_score': eval_metrics[metric_key],
                         'cv_score': cv_score,
-                        'train_score': train_metrics[metric_key]
+                        # Store best params to train the final model later
+                        'best_params': best_params
                     }
-                    
                     results.append(result)
-                    logger.info(f"Successfully trained and evaluated model: {model_name}")
-                    
+                    best_models_params[model_name] = best_params # Keep track of best params
+
                 except Exception as e:
-                    logger.error(f"Error training model {model_name}: {str(e)}", exc_info=True)
+                    logger.error(f"Error during RandomizedSearchCV for model {model_name}: {str(e)}", exc_info=True)
                     continue
-            
-            # 修改排序逻辑，仅使用cv_score
+
+            # Sort results based on the CV score (best_score_ from RandomizedSearchCV)
+            if not results:
+                 logger.error("No models were successfully evaluated.")
+                 return []
+
             if self.metric == 'r2':
                 # 对于R2，值越大越好
                 results.sort(key=lambda x: x['cv_score'], reverse=True)
@@ -262,15 +283,31 @@ class ModelTrainer:
                 # 对于RMSE，值越小越好
                 results.sort(key=lambda x: x['cv_score'], reverse=False)
             
-            # 存储最佳模型（基于综合评分）
+            # Select the best model based on the CV score
             if results:
-                # 存储最佳模型对象而非字典，以便可以直接调用predict方法
-                best_model_name = results[0]['model_name']
-                # 重新训练最佳模型使用全部数据
-                self.best_model = self.train_model(X, y, best_model_name)
-                logger.info(f"Selected best model: {best_model_name}")
-            
-            return results
+                best_result = results[0]
+                best_model_name = best_result['model_name']
+                best_model_params = best_models_params.get(best_model_name, {})
+
+                logger.info(f"Selected best model based on CV score: {best_model_name} with score {best_result['cv_score']:.4f}")
+
+                # Train the final best model on the *entire* dataset using the best hyperparameters found
+                final_model = self.available_models[best_model_name] # Get a fresh instance
+                try:
+                    if best_model_params:
+                         final_model.set_params(**best_model_params)
+                    logger.info(f"Training final best model ({best_model_name}) on the full dataset...")
+                    final_model.fit(X, y)
+                    self.best_model = final_model
+                    logger.info(f"Final best model ({best_model_name}) trained successfully.")
+                except Exception as e:
+                    logger.error(f"Error training final best model {best_model_name}: {str(e)}", exc_info=True)
+                    self.best_model = None # Ensure best_model is None if final training fails
+
+            # Return results containing only model name and cv_score
+            # Remove best_params from the returned list as it's internal use for final training
+            final_results = [{'model_name': r['model_name'], 'cv_score': r['cv_score']} for r in results]
+            return final_results
             
         except Exception as e:
             logger.error(f"Error in train_and_evaluate: {str(e)}", exc_info=True)

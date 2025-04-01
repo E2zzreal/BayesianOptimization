@@ -201,10 +201,7 @@ elif page == "模型训练与评估":
         # 评估指标选择
         metric = st.radio("选择评估指标", ["R²", "RMSE"])
 
-        # 训练测试集划分比例
-        test_size = st.slider("测试集比例", 0.1, 0.5, 0.2, 0.05)
-
-        # 交叉验证折数
+        # 交叉验证折数 (测试集比例已移除)
         cv_folds = st.slider("交叉验证折数", 3, 10, 5, 1)
 
         if st.button("训练模型"):
@@ -223,8 +220,8 @@ elif page == "模型训练与评估":
                     trainer = ModelTrainer(
                         models=models_to_train,
                         metric=metric.lower(),
-                        cv_folds=cv_folds,
-                        test_size=test_size
+                        cv_folds=cv_folds
+                        # test_size 参数已移除
                     )
 
                     # 使用缩放后的数据训练模型
@@ -241,20 +238,17 @@ elif page == "模型训练与评估":
                         ascending=True if metric.lower() == "rmse" else False
                     )
 
-                    # 格式化结果
-                    results_df["test_score"] = results_df["test_score"].apply(lambda x: f"{x:.4f}")
+                    # 格式化结果 (cv_score is already calculated correctly in trainer)
+                    # 只需格式化 cv_score 列
                     results_df["cv_score"] = results_df["cv_score"].apply(lambda x: f"{x:.4f}")
-                    results_df["train_score"] = results_df["train_score"].apply(lambda x: f"{x:.4f}")
 
-                    # 显示结果表格
+                    # 显示结果表格 - 只显示模型名称和交叉验证分数
                     display_df = pd.DataFrame([{
                         '模型名称': r['model_name'],
-                        '测试分数': r['test_score'],
-                        '交叉验证分数': r['cv_score'],
-                        '训练分数': r['train_score']
-                    } for r in results])
+                        '交叉验证分数': r['cv_score'] # Now derived from best_score_
+                    } for r in results_df.to_dict('records')]) # Use sorted df
 
-                    st.dataframe(display_df)
+                    st.dataframe(display_df.set_index('模型名称')) # Set index for better display
 
                     # 获取最佳模型
                     best_model_name = results_df.iloc[0]["model_name"]
