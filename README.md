@@ -22,6 +22,7 @@
    - 使用最优模型和选定的搜索策略进行优化搜索
    - 支持多种采集函数 (Acquisition Functions) 如：期望提升 (Expected Improvement, EI)、置信上界 (Upper Confidence Bound, UCB)、改进概率 (Probability of Improvement, PI) 等，用于推荐下一轮实验条件
    - 可自定义推荐的实验数量
+   - **新增特征和约束功能**：支持限制所有特征值的总和不超过指定值，适用于材料组分优化等场景
 
 4. **迭代优化**：
    - 支持补充新的实验数据
@@ -37,7 +38,7 @@
 2. 克隆本仓库
    ```bash
    git clone https://github.com/E2zzreal/BayesianOptimization.git
-   cd BayesianOptimizatio
+   cd BayesianOptimization
    ```
 
 3. 使用Docker Compose启动应用
@@ -46,6 +47,49 @@
    ```
 
 4. 在浏览器中访问 http://localhost:8501
+
+### 从Dockerfile构建并运行（可选）
+
+如果您不想使用Docker Compose，或者想要自定义构建过程，可以手动构建Docker镜像并运行容器：
+
+1.  **构建镜像**：在项目根目录下运行以下命令来构建Docker镜像。将 `your-image-name` 替换为您想要的镜像名称（例如 `bo-app`）。
+    ```bash
+    docker build -t your-image-name .
+    ```
+
+2.  **运行容器**：使用构建好的镜像启动一个容器。
+    ```bash
+    docker run -p 8501:8501 your-image-name
+    ```
+    *   `-p 8501:8501`：将主机的8501端口映射到容器的8501端口。
+    *   `your-image-name`：您在构建步骤中指定的镜像名称。
+
+3.  **访问应用**：在浏览器中访问 http://localhost:8501
+
+### 打包镜像并在其他机器运行
+
+如果您需要将构建好的镜像迁移到另一台没有网络连接或无法直接访问 Docker Hub 的机器上运行，可以按以下步骤操作：
+
+1.  **保存镜像为文件**：在构建镜像的机器上，使用 `docker save` 命令将镜像导出为 `.tar` 文件。
+    ```bash
+    # 将 your-image-name 替换为您构建时使用的镜像名
+    docker save -o your-image-name.tar your-image-name
+    ```
+
+2.  **传输文件**：将生成的 `your-image-name.tar` 文件复制到目标机器。
+
+3.  **加载镜像**：在目标机器上，使用 `docker load` 命令从 `.tar` 文件加载镜像。
+    ```bash
+    docker load -i your-image-name.tar
+    ```
+    加载后，可以使用 `docker images` 确认镜像已存在。
+
+4.  **运行容器**：使用加载的镜像运行容器。
+    ```bash
+    docker run -p 8501:8501 your-image-name
+    ```
+
+5.  **访问应用**：在目标机器的浏览器中访问 `http://localhost:8501`。
 
 ### 本地运行
 
@@ -94,6 +138,7 @@
    - 选择采集函数（例如：EI、UCB、PI）
    - 设置优化目标（最大化或最小化）
    - （可选，主要用于非高斯过程/随机森林模型）设置Bootstrap模型数量以估计预测不确定性
+   - **新增约束设置**：在"高级约束设置"中可启用特征和约束，限制所有特征值的总和不超过指定值
 
 4. **实验推荐**：
    - （确保已完成特征空间定义与优化设置）

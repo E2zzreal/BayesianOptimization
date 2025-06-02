@@ -478,6 +478,39 @@ elif page == "搜索推荐":
                 strategy_params['n_neighbors'] = st.number_input("邻居数量 (n_neighbors)", min_value=1, value=5, step=1, key="sa_neighbors")
         # --- END ---
 
+        # 特征和约束设置
+        st.subheader("高级约束设置")
+        with st.expander("特征和约束", expanded=False):
+            use_sum_constraint = st.checkbox(
+                "启用特征和约束",
+                value=False,
+                help="限制所有特征值的总和不超过指定值，常用于材料组分优化（如各组分百分比总和≤100%）"
+            )
+            
+            if use_sum_constraint:
+                max_sum_value = st.number_input(
+                    "最大特征和",
+                    min_value=0.0,
+                    value=1.0,
+                    step=0.1,
+                    format="%.2f",
+                    help="所有特征值的总和不能超过此值"
+                )
+                
+                # 显示约束信息
+                if 'feature_ranges' in st.session_state and st.session_state.feature_ranges:
+                    min_possible_sum = sum(range_info['min'] for range_info in st.session_state.feature_ranges.values())
+                    max_possible_sum = sum(range_info['max'] for range_info in st.session_state.feature_ranges.values())
+                    
+                    st.info(f"当前特征范围下：最小可能和 = {min_possible_sum:.2f}，最大可能和 = {max_possible_sum:.2f}")
+                    
+                    if max_sum_value < min_possible_sum:
+                        st.warning(f"约束值({max_sum_value})小于最小可能和({min_possible_sum:.2f})，可能无法生成有效样本")
+                    elif max_sum_value >= max_possible_sum:
+                        st.info("约束值大于等于最大可能和，约束不会起作用")
+            else:
+                max_sum_value = None
+
         # 采样函数选择
         acquisition_function = st.selectbox(
             "选择采样函数",
@@ -524,7 +557,7 @@ elif page == "搜索推荐":
                         X_original = st.session_state.data[st.session_state.features]
                         y = st.session_state.data[st.session_state.target]
 
-                        # 初始化贝叶斯优化器，并传入拟合好的 scaler
+                        # 初始化贝叶斯优化器，并传入拟合好的 scaler 和约束参数
                         optimizer = BayesianOptimizer(
                             model=st.session_state.model,
                             feature_ranges=st.session_state.feature_ranges,
@@ -534,11 +567,12 @@ elif page == "搜索推荐":
                             n_bootstraps=st.session_state.n_bootstraps, # 从会话状态读取
                             search_strategy=selected_strategy_key, # 使用映射后的值
                             search_strategy_params=strategy_params, # 传递策略参数
-                            scaler=st.session_state.data_processor.scaler # 传入 scaler
+                            scaler=st.session_state.data_processor.scaler, # 传入 scaler
+                            max_sum=max_sum_value # 传递约束参数
                         )
 
-                        # 生成推荐 (优化器内部会使用scaler)
-                        recommendations = optimizer.recommend_experiments(X_original, y, n_recommendations)
+                        # 生成推荐 (优化器内部会使用scaler和约束)
+                        recommendations = optimizer.recommend_experiments(X_original, y, n_recommendations, max_sum=max_sum_value)
 
                         # 保存到会话状态
                         st.session_state.recommendations = recommendations

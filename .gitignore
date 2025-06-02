@@ -112,7 +112,7 @@ venv.bak/
 docker-compose.override.yml
 *.env
 .dockerignore
-
+*.tar
 # IDE files
 .idea/
 .vscode/

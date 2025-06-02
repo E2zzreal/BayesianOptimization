@@ -21,7 +21,7 @@ class BayesianOptimizer:
      贝叶斯优化器类，用于特征空间搜索和实验推荐
      """
 
-    def __init__(self, model=None, feature_ranges=None, acquisition_function='ei', maximize=True, random_state=42, method=None, n_bootstraps=50, search_strategy='grid', search_strategy_params=None, scaler=None): # 添加 search_strategy_params
+    def __init__(self, model=None, feature_ranges=None, acquisition_function='ei', maximize=True, random_state=42, method=None, n_bootstraps=50, search_strategy='grid', search_strategy_params=None, scaler=None, max_sum=None): # 添加 max_sum 参数
         """
         初始化贝叶斯优化器
 
@@ -38,6 +38,7 @@ class BayesianOptimizer:
                              'sa'(模拟退火), 'random'(随机搜索)，或者直接传入SearchStrategy的实例
              search_strategy_params: 包含高级搜索策略参数的字典 (可选)
              scaler: 用于特征缩放的 scikit-learn scaler 对象 (例如 StandardScaler)
+             max_sum: 特征和的最大值约束，如果为None则不应用约束
          """
         self.model = model
         self.feature_ranges = feature_ranges
@@ -49,6 +50,7 @@ class BayesianOptimizer:
         self.bootstrap_models = [] # Fix indentation
         self.search_strategy_params = search_strategy_params if isinstance(search_strategy_params, dict) else {} # Fix indentation
         self.scaler = scaler # Fix indentation
+        self.max_sum = max_sum # 保存约束参数
 
         # --- START FEATURE COUNT VALIDATION ---
         if not isinstance(feature_ranges, dict):
@@ -126,16 +128,16 @@ class BayesianOptimizer:
             strategy_name = search_strategy.lower()
 
             if strategy_name == 'grid':
-                return GridSearch(self.feature_ranges, self.random_state)
+                return GridSearch(self.feature_ranges, self.random_state, self.max_sum)
             elif strategy_name == 'ga':
                 # 使用 ** 解包传递参数，如果参数字典中没有对应键，则使用类定义的默认值
-                return GeneticAlgorithm(self.feature_ranges, self.random_state, **self.search_strategy_params)
+                return GeneticAlgorithm(self.feature_ranges, self.random_state, max_sum=self.max_sum, **self.search_strategy_params)
             elif strategy_name == 'pso':
-                return ParticleSwarmOptimization(self.feature_ranges, self.random_state, **self.search_strategy_params)
+                return ParticleSwarmOptimization(self.feature_ranges, self.random_state, max_sum=self.max_sum, **self.search_strategy_params)
             elif strategy_name == 'sa':
-                return SimulatedAnnealing(self.feature_ranges, self.random_state, **self.search_strategy_params)
+                return SimulatedAnnealing(self.feature_ranges, self.random_state, max_sum=self.max_sum, **self.search_strategy_params)
             elif strategy_name == 'random':
-                return RandomSearch(self.feature_ranges, self.random_state)
+                return RandomSearch(self.feature_ranges, self.random_state, self.max_sum)
             else:
                 raise ValueError(f"不支持的搜索策略: {search_strategy}，可选: 'grid', 'ga', 'pso', 'sa', 'random'")
 
@@ -656,7 +658,7 @@ class BayesianOptimizer:
         else:
             raise ValueError(f"不支持的采样函数: {self.acquisition_function}")
 
-    def recommend_experiments(self, X, y, n_recommendations=3):
+    def recommend_experiments(self, X, y, n_recommendations=3, max_sum=None):
         """
         推荐下一轮实验条件
 
@@ -664,6 +666,7 @@ class BayesianOptimizer:
             X: 已有实验的特征矩阵 (DataFrame or NumPy array, 原始尺度)
             y: 已有实验的目标向量 (Series or NumPy array, 原始尺度)
             n_recommendations: 推荐实验数量
+            max_sum: 特征和的最大值约束，如果为None则使用初始化时的值
 
         返回:
             推荐实验条件的DataFrame (原始尺度)
@@ -748,13 +751,17 @@ class BayesianOptimizer:
             # Pass original scale points and original scale y_aligned
             return self._calculate_acquisition(points_array, X_aligned.values, y_aligned.values)
 
+        # 确定使用的约束值
+        constraint = max_sum if max_sum is not None else self.max_sum
+        
         # 使用选定的搜索策略执行搜索
         # Search strategy operates on the original feature scale
         search_results = self.search_strategy.search(
             model=self.model, # Base model might be needed by some strategies
             acquisition_func=acquisition_func_for_search,
             n_points=n_recommendations, # Tell strategy how many points we ideally want
-            maximize=self.maximize # Pass maximize flag to strategy
+            maximize=self.maximize, # Pass maximize flag to strategy
+            max_sum=constraint # Pass constraint to search strategy
         )
 
         # --- Post-processing Search Results ---

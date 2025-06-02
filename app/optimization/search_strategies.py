@@ -3,23 +3,127 @@ import pandas as pd
 import random
 from abc import ABC, abstractmethod
 
+
+def apply_sum_constraint(points, max_sum=None):
+    """
+    应用特征和约束，过滤掉不满足约束的点
+    
+    参数:
+        points: 候选点矩阵(DataFrame或numpy array)
+        max_sum: 最大特征和阈值，如果为None则不应用约束
+        
+    返回:
+        满足约束的候选点(与输入类型相同)
+    """
+    if max_sum is None:
+        return points
+    
+    # 处理DataFrame输入
+    if isinstance(points, pd.DataFrame):
+        # 计算每行特征的和
+        row_sums = points.sum(axis=1)
+        # 找到满足约束的行
+        valid_mask = row_sums <= max_sum
+        return points[valid_mask].reset_index(drop=True)
+    
+    # 处理numpy array输入
+    elif isinstance(points, np.ndarray):
+        # 计算每行特征的和
+        row_sums = np.sum(points, axis=1)
+        # 找到满足约束的行
+        valid_mask = row_sums <= max_sum
+        return points[valid_mask]
+    
+    else:
+        raise TypeError("points必须是pandas DataFrame或numpy array")
+
+
+def generate_constrained_samples(feature_ranges, n_points, max_sum=None, max_attempts=10000):
+    """
+    生成满足约束的随机样本点
+    
+    参数:
+        feature_ranges: 特征范围字典
+        n_points: 需要生成的点数
+        max_sum: 最大特征和约束
+        max_attempts: 最大尝试次数
+        
+    返回:
+        满足约束的样本点DataFrame
+    """
+    if max_sum is None:
+        # 如果没有约束，直接随机采样
+        samples = {}
+        feature_names = list(feature_ranges.keys())
+        
+        for feature in feature_names:
+            range_info = feature_ranges[feature]
+            min_val = range_info['min']
+            max_val = range_info['max']
+            samples[feature] = np.random.uniform(min_val, max_val, n_points)
+        
+        return pd.DataFrame(samples)
+    
+    # 有约束的情况，使用拒绝采样
+    feature_names = list(feature_ranges.keys())
+    valid_samples = []
+    attempts = 0
+    
+    while len(valid_samples) < n_points and attempts < max_attempts:
+        # 生成一批候选样本
+        batch_size = min(n_points * 2, 1000)  # 批量生成以提高效率
+        batch_samples = {}
+        
+        for feature in feature_names:
+            range_info = feature_ranges[feature]
+            min_val = range_info['min']
+            max_val = range_info['max']
+            batch_samples[feature] = np.random.uniform(min_val, max_val, batch_size)
+        
+        batch_df = pd.DataFrame(batch_samples)
+        
+        # 应用约束过滤
+        constrained_batch = apply_sum_constraint(batch_df, max_sum)
+        
+        # 添加到有效样本列表
+        if len(constrained_batch) > 0:
+            valid_samples.append(constrained_batch)
+        
+        attempts += batch_size
+    
+    if not valid_samples:
+        raise ValueError(f"在{max_attempts}次尝试后无法生成满足约束(sum <= {max_sum})的样本点。请检查约束设置是否合理。")
+    
+    # 合并所有有效样本
+    all_valid = pd.concat(valid_samples, ignore_index=True)
+    
+    # 如果生成的样本超过需要的数量，随机选择
+    if len(all_valid) > n_points:
+        return all_valid.sample(n=n_points, random_state=42).reset_index(drop=True)
+    elif len(all_valid) < n_points:
+        print(f"警告: 只能生成{len(all_valid)}个满足约束的样本点，少于请求的{n_points}个")
+    
+    return all_valid
+
 class SearchStrategy(ABC):
     """
     搜索策略的抽象基类，定义了所有搜索策略必须实现的接口
     """
     
-    def __init__(self, feature_ranges, random_state=42):
+    def __init__(self, feature_ranges, random_state=42, max_sum=None):
         """
         初始化搜索策略
         
         参数:
             feature_ranges: 特征范围字典，格式为 {feature_name: {'min': min_val, 'max': max_val, 'step': step_val}}
             random_state: 随机种子
+            max_sum: 特征和的最大值约束，如果为None则不应用约束
         """
         if not isinstance(feature_ranges, dict):
             raise TypeError("feature_ranges 必须是字典类型")
         self.feature_ranges = feature_ranges
         self.random_state = random_state
+        self.max_sum = max_sum
         self.feature_names = list(feature_ranges.keys())
         if len(self.feature_names) != len(feature_ranges):
              # This should theoretically not happen if feature_ranges is a dict
@@ -28,7 +132,7 @@ class SearchStrategy(ABC):
         random.seed(random_state)
     
     @abstractmethod
-    def search(self, model, acquisition_func, n_points=100, maximize=True):
+    def search(self, model, acquisition_func, n_points=100, maximize=True, max_sum=None):
         """
         执行搜索并返回最优点
         
@@ -37,6 +141,7 @@ class SearchStrategy(ABC):
             acquisition_func: 采集函数，用于评估点的价值
             n_points: 要评估的点的数量
             maximize: 是否最大化目标，True为最大化，False为最小化
+            max_sum: 特征和的最大值约束，如果为None则使用初始化时的值
             
         返回:
             搜索结果的DataFrame
@@ -89,16 +194,25 @@ class SearchStrategy(ABC):
         """
         pass
     
-    def _random_sample(self, n_points):
+    def _random_sample(self, n_points, max_sum=None):
         """
         在特征空间中随机采样点
         
         参数:
             n_points: 要采样的点的数量
+            max_sum: 特征和的最大值约束，如果为None则使用self.max_sum
             
         返回:
             采样点的DataFrame
         """
+        # 确定使用的约束值
+        constraint = max_sum if max_sum is not None else self.max_sum
+        
+        # 如果有约束，使用约束采样函数
+        if constraint is not None:
+            return generate_constrained_samples(self.feature_ranges, n_points, constraint)
+        
+        # 无约束的情况，使用原始采样方法
         samples = {}
         
         for feature in self.feature_names:
@@ -117,7 +231,7 @@ class RandomSearch(SearchStrategy):
     随机搜索策略
     """
     
-    def search(self, model, acquisition_func, n_points=100, maximize=True):
+    def search(self, model, acquisition_func, n_points=100, maximize=True, max_sum=None):
         """
         执行随机搜索
         
@@ -126,12 +240,20 @@ class RandomSearch(SearchStrategy):
             acquisition_func: 采集函数，用于评估点的价值
             n_points: 要评估的点的数量
             maximize: 是否最大化目标，True为最大化，False为最小化
+            max_sum: 特征和的最大值约束，如果为None则使用初始化时的值
             
         返回:
             搜索结果的DataFrame
         """
-        # 随机采样n_points个点
-        random_points = self._random_sample(n_points)
+        # 确定使用的约束值
+        constraint = max_sum if max_sum is not None else self.max_sum
+        
+        # 随机采样n_points个点（考虑约束）
+        random_points = self._random_sample(n_points, constraint)
+        
+        # 如果由于约束导致生成的点数不足，发出警告
+        if len(random_points) < n_points:
+            print(f"警告: 由于约束限制，只生成了{len(random_points)}个点，少于请求的{n_points}个")
         
         # 使用模型预测目标值
         random_points['predicted_value'] = model.predict(random_points)
@@ -162,7 +284,7 @@ class GridSearch(SearchStrategy):
     网格搜索策略
     """
     
-    def search(self, model, acquisition_func, n_points=None, maximize=True):
+    def search(self, model, acquisition_func, n_points=None, maximize=True, max_sum=None):
         """
         执行网格搜索
         
@@ -171,11 +293,26 @@ class GridSearch(SearchStrategy):
             acquisition_func: 采集函数，用于评估点的价值
             n_points: 不使用，网格搜索使用步长确定点数
             maximize: 是否最大化目标，True为最大化，False为最小化
+            max_sum: 特征和的最大值约束，如果为None则使用初始化时的值
             
         返回:
             搜索结果的DataFrame
         """
+        # 确定使用的约束值
+        constraint = max_sum if max_sum is not None else self.max_sum
+        
         grid_df = self._generate_grid()
+        
+        # 应用约束过滤
+        if constraint is not None:
+            original_size = len(grid_df)
+            grid_df = apply_sum_constraint(grid_df, constraint)
+            if len(grid_df) < original_size:
+                print(f"约束过滤: 从{original_size}个网格点中保留了{len(grid_df)}个满足约束的点")
+        
+        # 如果过滤后没有点，抛出错误
+        if len(grid_df) == 0:
+            raise ValueError(f"应用约束(sum <= {constraint})后，没有网格点满足条件。请调整约束值或特征范围。")
         
         # 使用模型预测目标值
         grid_df['predicted_value'] = model.predict(grid_df)
@@ -299,8 +436,8 @@ class GeneticAlgorithm(SearchStrategy):
     遗传算法搜索策略
     """
     
-    def __init__(self, feature_ranges, random_state=42, population_size=50, n_generations=10, 
-                 crossover_prob=0.8, mutation_prob=0.2):
+    def __init__(self, feature_ranges, random_state=42, population_size=50, n_generations=10,
+                 crossover_prob=0.8, mutation_prob=0.2, max_sum=None):
         """
         初始化遗传算法
         
@@ -311,14 +448,15 @@ class GeneticAlgorithm(SearchStrategy):
             n_generations: 迭代代数
             crossover_prob: 交叉概率
             mutation_prob: 变异概率
+            max_sum: 特征和的最大值约束
         """
-        super().__init__(feature_ranges, random_state)
+        super().__init__(feature_ranges, random_state, max_sum)
         self.population_size = population_size
         self.n_generations = n_generations
         self.crossover_prob = crossover_prob
         self.mutation_prob = mutation_prob
     
-    def search(self, model, acquisition_func, n_points=100, maximize=True):
+    def search(self, model, acquisition_func, n_points=100, maximize=True, max_sum=None):
         """
         执行遗传算法搜索
         
@@ -327,12 +465,21 @@ class GeneticAlgorithm(SearchStrategy):
             acquisition_func: 采集函数，用于评估个体的适应度
             n_points: 返回的最优点数量
             maximize: 是否最大化目标
+            max_sum: 特征和的最大值约束，如果为None则使用初始化时的值
             
         返回:
             搜索结果的DataFrame
         """
-        # 初始化种群
-        population = self._random_sample(self.population_size)
+        # 确定使用的约束值
+        constraint = max_sum if max_sum is not None else self.max_sum
+        
+        # 初始化种群（考虑约束）
+        population = self._random_sample(self.population_size, constraint)
+        
+        # 如果由于约束导致种群大小不足，发出警告
+        if len(population) < self.population_size:
+            print(f"警告: 由于约束限制，种群大小为{len(population)}，少于设定的{self.population_size}")
+            self.population_size = len(population)  # 调整种群大小
         
         # 迭代进化
         for generation in range(self.n_generations):
@@ -444,7 +591,7 @@ class GeneticAlgorithm(SearchStrategy):
     
     def _mutation(self, offspring):
         """
-        变异操作
+        变异操作（支持约束）
         
         参数:
             offspring: 子代种群
@@ -452,17 +599,33 @@ class GeneticAlgorithm(SearchStrategy):
         返回:
             变异后的子代
         """
-        for i in range(self.population_size):
+        for i in range(len(offspring)):  # 使用实际种群大小
             for j, feature in enumerate(self.feature_names):
                 # 以变异概率决定是否进行变异
                 if np.random.random() < self.mutation_prob:
-                    # 获取特征范围
-                    range_info = self.feature_ranges[feature]
-                    min_val = range_info['min']
-                    max_val = range_info['max']
-                    
-                    # 生成新的特征值
-                    offspring.loc[i, feature] = np.random.uniform(min_val, max_val)
+                    # 如果有约束，需要确保变异后仍满足约束
+                    if self.max_sum is not None:
+                        # 计算其他特征的和
+                        other_features_sum = offspring.loc[i, [f for f in self.feature_names if f != feature]].sum()
+                        
+                        # 计算当前特征的可用范围
+                        range_info = self.feature_ranges[feature]
+                        min_val = range_info['min']
+                        max_val = min(range_info['max'], self.max_sum - other_features_sum)
+                        
+                        # 如果可用范围有效，则进行变异
+                        if max_val > min_val:
+                            offspring.loc[i, feature] = np.random.uniform(min_val, max_val)
+                    else:
+                        # 无约束的情况，正常变异
+                        range_info = self.feature_ranges[feature]
+                        min_val = range_info['min']
+                        max_val = range_info['max']
+                        offspring.loc[i, feature] = np.random.uniform(min_val, max_val)
+        
+        # 如果有约束，过滤掉不满足约束的个体
+        if self.max_sum is not None:
+            offspring = apply_sum_constraint(offspring, self.max_sum)
         
         return offspring
 
@@ -472,8 +635,8 @@ class ParticleSwarmOptimization(SearchStrategy):
     粒子群优化搜索策略
     """
     
-    def __init__(self, feature_ranges, random_state=42, n_particles=30, n_iterations=20, 
-                 inertia_weight=0.5, cognitive_weight=1.5, social_weight=1.5):
+    def __init__(self, feature_ranges, random_state=42, n_particles=30, n_iterations=20,
+                 inertia_weight=0.5, cognitive_weight=1.5, social_weight=1.5, max_sum=None):
         """
         初始化粒子群优化
         
@@ -485,15 +648,16 @@ class ParticleSwarmOptimization(SearchStrategy):
             inertia_weight: 惯性权重
             cognitive_weight: 认知权重
             social_weight: 社会权重
+            max_sum: 特征和的最大值约束
         """
-        super().__init__(feature_ranges, random_state)
+        super().__init__(feature_ranges, random_state, max_sum)
         self.n_particles = n_particles
         self.n_iterations = n_iterations
         self.inertia_weight = inertia_weight
         self.cognitive_weight = cognitive_weight
         self.social_weight = social_weight
     
-    def search(self, model, acquisition_func, n_points=100, maximize=True):
+    def search(self, model, acquisition_func, n_points=100, maximize=True, max_sum=None):
         """
         执行粒子群优化搜索
         
@@ -502,12 +666,22 @@ class ParticleSwarmOptimization(SearchStrategy):
             acquisition_func: 采集函数，用于评估粒子的适应度
             n_points: 返回的最优点数量
             maximize: 是否最大化目标
+            max_sum: 特征和的最大值约束，如果为None则使用初始化时的值
             
         返回:
             搜索结果的DataFrame
         """
-        # 初始化粒子位置和速度
-        particles = self._random_sample(self.n_particles)
+        # 确定使用的约束值
+        constraint = max_sum if max_sum is not None else self.max_sum
+        
+        # 初始化粒子位置和速度（考虑约束）
+        particles = self._random_sample(self.n_particles, constraint)
+        
+        # 如果由于约束导致粒子数量不足，发出警告并调整
+        if len(particles) < self.n_particles:
+            print(f"警告: 由于约束限制，粒子数量为{len(particles)}，少于设定的{self.n_particles}")
+            self.n_particles = len(particles)
+        
         velocities = self._initialize_velocities()
         
         # 初始化个体最优位置和适应度 (只传递特征列)
@@ -646,8 +820,8 @@ class SimulatedAnnealing(SearchStrategy):
     模拟退火搜索策略
     """
     
-    def __init__(self, feature_ranges, random_state=42, n_iterations=100, 
-                 initial_temp=100, cooling_rate=0.95, n_neighbors=5):
+    def __init__(self, feature_ranges, random_state=42, n_iterations=100,
+                 initial_temp=100, cooling_rate=0.95, n_neighbors=5, max_sum=None):
         """
         初始化模拟退火
         
@@ -658,14 +832,15 @@ class SimulatedAnnealing(SearchStrategy):
             initial_temp: 初始温度
             cooling_rate: 冷却率
             n_neighbors: 每次迭代生成的邻居数量
+            max_sum: 特征和的最大值约束
         """
-        super().__init__(feature_ranges, random_state)
+        super().__init__(feature_ranges, random_state, max_sum)
         self.n_iterations = n_iterations
         self.initial_temp = initial_temp
         self.cooling_rate = cooling_rate
         self.n_neighbors = n_neighbors
     
-    def search(self, model, acquisition_func, n_points=100, maximize=True):
+    def search(self, model, acquisition_func, n_points=100, maximize=True, max_sum=None):
         """
         执行模拟退火搜索
         
@@ -674,12 +849,20 @@ class SimulatedAnnealing(SearchStrategy):
             acquisition_func: 采集函数，用于评估解的质量
             n_points: 返回的最优点数量
             maximize: 是否最大化目标
+            max_sum: 特征和的最大值约束，如果为None则使用初始化时的值
             
         返回:
             搜索结果的DataFrame
         """
-        # 初始化当前解 (只传递特征列)
-        current_solution = self._random_sample(1)
+        # 确定使用的约束值
+        constraint = max_sum if max_sum is not None else self.max_sum
+        
+        # 初始化当前解（考虑约束）
+        current_solution = self._random_sample(1, constraint)
+        
+        # 如果由于约束无法生成初始解，抛出错误
+        if len(current_solution) == 0:
+            raise ValueError(f"无法生成满足约束(sum <= {constraint})的初始解。请调整约束值或特征范围。")
         current_solution['predicted_value'] = model.predict(current_solution[self.feature_names]) # 预测也应只用特征列
         current_solution['acquisition_value'] = acquisition_func(current_solution[self.feature_names].values)
         current_fitness = current_solution['acquisition_value'].values[0]
@@ -772,7 +955,7 @@ class SimulatedAnnealing(SearchStrategy):
     
     def _generate_neighbors(self, current_solution):
         """
-        生成邻居解
+        生成邻居解（支持约束）
         
         参数:
             current_solution: 当前解
@@ -783,7 +966,10 @@ class SimulatedAnnealing(SearchStrategy):
         neighbors = []
         current_values = current_solution.values[0]
         
-        for _ in range(self.n_neighbors):
+        attempts = 0
+        max_attempts = self.n_neighbors * 10  # 最大尝试次数
+        
+        while len(neighbors) < self.n_neighbors and attempts < max_attempts:
             neighbor = {}
             for i, (feature, range_info) in enumerate(self.feature_ranges.items()):
                 min_val = range_info['min']
@@ -798,6 +984,14 @@ class SimulatedAnnealing(SearchStrategy):
                 new_val = max(min_val, min(max_val, new_val))
                 neighbor[feature] = new_val
             
-            neighbors.append(neighbor)
+            # 检查约束
+            if self.max_sum is None or sum(neighbor.values()) <= self.max_sum:
+                neighbors.append(neighbor)
+            
+            attempts += 1
+        
+        # 如果生成的邻居数量不足，发出警告
+        if len(neighbors) < self.n_neighbors:
+            print(f"警告: 由于约束限制，只生成了{len(neighbors)}个邻居解，少于设定的{self.n_neighbors}个")
         
         return pd.DataFrame(neighbors)
